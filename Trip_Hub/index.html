@@ -1,0 +1,3644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trip Hub</title>
+    <link rel="icon" type="image/svg+xml"
+          href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%97%BA%EF%B8%8F%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        h1 {
+            color: #333;
+            font-size: 28px;
+        }
+        
+        /* Device picker — custom dropdown so each row can carry a colour
+           swatch + delete button (a native <select> can't do that). */
+        .device-picker { position: relative; }
+        .device-picker-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 12px;
+            border: 1px solid #d4d4d8;
+            border-radius: 6px;
+            background: white;
+            font-size: 15px;
+            font-family: inherit;
+            color: #222;
+            cursor: pointer;
+            min-width: 130px;
+            transition: border-color 0.15s;
+        }
+        /* Mini colour swatches shown on the LEFT of the picker button
+           so a glance tells you which devices are tracked + what
+           colour each one uses. margin-right:auto pushes the 'All'
+           label and the arrow to the far right of the button. Stays
+           in sync with setDeviceColor and loadDevices via
+           updateDevicePickerLabel(). */
+        .all-swatches {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            margin-right: auto;
+        }
+        .all-swatches .mini-swatch {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            display: inline-block;
+        }
+        .device-picker-btn:hover { border-color: #2196F3; }
+        .device-picker-arrow { color: #999; font-size: 14px; }
+        .device-picker-label { display: flex; align-items: center; gap: 6px; }
+        .device-picker-label svg { flex: 0 0 auto; }
+        .device-picker { z-index: 9000; }
+        .device-picker-menu {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            background: white;
+            border: 1px solid #d4d4d8;
+            border-radius: 6px;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+            min-width: 200px;
+            /* Leaflet's panes go up to z-index 700; we need to sit above
+               the entire map container's stacking context. */
+            z-index: 9001;
+            padding: 4px;
+        }
+        .device-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            user-select: none;
+        }
+        .device-row:hover { background: #f5f5f5; }
+        /* Active row: distinct from hover so the currently-selected
+           device is always visually unambiguous, even if the cursor
+           is hovering over another row at the moment. */
+        .device-row.active {
+            background: #bbdefb;
+            box-shadow: inset 3px 0 0 #1976d2;
+            font-weight: 600;
+        }
+        .device-row.active:hover { background: #bbdefb; }
+        .device-row .name {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        /* 'All devices' row only — center the label since the row has
+           no swatch on its left to balance against. Individual device
+           rows keep the default left-aligned text next to their swatch. */
+        .device-row[data-device=""] .name {
+            text-align: center;
+        }
+        .device-row .swatch-wrap {
+            position: relative;
+            flex: 0 0 auto;
+        }
+        .device-row .swatch {
+            width: 20px;
+            height: 20px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .palette {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            background: white;
+            border: 1px solid #d4d4d8;
+            border-radius: 6px;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+            padding: 8px;
+            z-index: 9002;
+            min-width: 180px;
+        }
+        .palette[hidden] { display: none; }
+        .palette-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 22px);
+            gap: 4px;
+        }
+        .palette-color {
+            width: 22px;
+            height: 22px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid rgba(0,0,0,0.12);
+            transition: transform 0.1s;
+        }
+        .palette-color:hover { transform: scale(1.15); }
+        .palette-color.current {
+            outline: 2px solid #2196F3;
+            outline-offset: 1px;
+        }
+        .palette-ok {
+            /* Top-of-palette so the native picker (which the browser
+               renders below the input) never visually covers it. */
+            display: block;
+            width: 100%;
+            margin-bottom: 8px;
+            padding: 7px 10px;
+            border: 1px solid #2196F3;
+            background: #2196F3;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: inherit;
+            font-weight: 500;
+        }
+        .palette-ok:hover { background: #1976D2; border-color: #1976D2; }
+
+        /* Device pin marker — divIcon wrapper needs no background of its own */
+        .device-pin { background: transparent !important; border: none !important; }
+        .device-pin svg {
+            display: block;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25));
+        }
+        .palette-custom {
+            margin-top: 8px;
+            width: 100%;
+            height: 28px;
+            border: 1px solid #d4d4d8;
+            border-radius: 4px;
+            padding: 0;
+            cursor: pointer;
+            background: white;
+        }
+        .device-row .delete-btn {
+            flex: 0 0 auto;
+            border: none;
+            background: transparent;
+            color: #b91c1c;
+            cursor: pointer;
+            padding: 2px 6px;
+            font-size: 14px;
+            opacity: 0.55;
+            border-radius: 3px;
+        }
+        .device-row:hover .delete-btn { opacity: 1; }
+        .device-row .delete-btn:hover { background: #fee2e2; opacity: 1; }
+        .device-row .edit-btn {
+            flex: 0 0 auto;
+            border: none;
+            background: transparent;
+            color: #2563eb;
+            cursor: pointer;
+            padding: 2px 6px;
+            font-size: 14px;
+            opacity: 0.55;
+            border-radius: 3px;
+        }
+        .device-row:hover .edit-btn { opacity: 1; }
+        .device-row .edit-btn:hover { background: #dbeafe; opacity: 1; }
+        .device-row-divider {
+            height: 1px;
+            background: #e5e7eb;
+            margin: 4px 6px;
+        }
+        .device-row-restore,
+        .device-row-add {
+            padding: 7px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #2196F3;
+            text-align: center;
+            user-select: none;
+        }
+        .device-row-restore:hover,
+        .device-row-add:hover { background: #f5f5f5; }
+        .device-row-add {
+            border-top: 1px solid #e5e7eb;
+            margin-top: 4px;
+            padding-top: 9px;
+            font-weight: 500;
+        }
+
+        .panel .range-inputs {
+            display: flex;
+            gap: 8px;
+            width: 100%;
+            min-width: 0;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .panel .range-inputs input[type="date"] {
+            flex: 1;
+            min-width: 0;
+            padding: 5px 8px;
+            border: 1px solid #d4d4d8;
+            border-radius: 5px;
+            background: white;
+            font-size: 13px;
+            line-height: 1.2;
+            font-family: inherit;
+            color: #222;
+            box-sizing: border-box;
+        }
+        .panel .range-inputs .range-sep {
+            flex: 0 0 auto;
+            color: #222;
+            font-weight: 900;
+            letter-spacing: -1px;
+            font-size: 18px;
+            line-height: 1;
+            user-select: none;
+        }
+        .panel .range-inputs input[type="date"]:focus {
+            outline: none;
+            border-color: #2196F3;
+        }
+
+        /* Quick-range preset row (Today / Yesterday / Week / Month / Year) */
+        .quick-row {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 14px;
+        }
+        .quick-btn {
+            flex: 1;
+            min-width: 0;
+            padding: 5px 4px;
+            border: 1px solid #d4d4d8;
+            background: white;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #2196F3;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.12s;
+            white-space: nowrap;
+        }
+        .quick-btn:hover {
+            background: #eff6ff;
+            border-color: #93c5fd;
+        }
+        .quick-btn.active {
+            background: #2196F3;
+            color: white;
+            border-color: #2196F3;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            background: #1976D2;
+        }
+        
+        .main-grid {
+            display: grid;
+            grid-template-columns: 320px 1fr 350px;
+            gap: 20px;
+        }
+        /* Stand-alone left column holding the Chat panel. Mirrors the
+           right .sidebar visually so the page feels balanced. */
+        .left-sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .main-content {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .profile-tabs {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+        }
+        
+        .profile-tab {
+            padding: 8px 16px;
+            border: 2px solid #ddd;
+            background: white;
+            color: #333;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+            white-space: nowrap;
+            font-size: 13px;
+        }
+        
+        .profile-tab:hover {
+            border-color: #2196F3;
+            color: #333;
+        }
+        
+        .profile-tab.active {
+            border-color: #2196F3;
+            background: #E3F2FD;
+            color: #1976D2;
+            font-weight: 600;
+        }
+        
+        .view-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid #eee;
+            /* Match the padding-right on the row above (profile tabs +
+               device picker) so the Activity Log tab's right edge lines
+               up with the device dropdown's right edge. */
+            padding: 0 15px 0 0;
+            /* Continuous gray strip — without this the gap between the
+               last left-tab (Speed Trend) and Activity Log (margin-left
+               auto) would expose the white panel background. */
+            background: #f5f5f5;
+        }
+        /* Push the Activity tab to the right edge of the tab bar — it
+           is a system-wide diagnostic feed, separate from the
+           per-device data views (Map / Distribution / Trend). */
+        .view-tab-right { margin-left: auto; }
+        
+        .view-tab {
+            padding: 12px 20px;
+            background: #f5f5f5;
+            border: none;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            font-size: 14px;
+            color: #666;
+            border-radius: 0;
+        }
+        
+        .view-tab:hover {
+            background: white;
+        }
+        
+        .filter-pill {
+            padding: 4px 10px;
+            border: 1px solid #ddd;
+            background: white;
+            color: #333;        /* override the global button { color:white } */
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        .filter-pill:hover { background: #f5f5f5; }
+        .filter-pill.active {
+            background: #2196F3;
+            color: white;
+            border-color: #2196F3;
+        }
+
+        .view-tab.active {
+            color: #2196F3;
+            border-bottom-color: #2196F3;
+            background: white;
+        }
+        
+        .views-container {
+            padding: 20px;
+        }
+        
+        .view {
+            display: none;
+        }
+        
+        .view.active {
+            display: block;
+        }
+        
+        #map {
+            height: 500px;
+            border-radius: 4px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            border-left: 4px solid #2196F3;
+            text-align: center;
+        }
+        
+        .stat-card.avg {
+            border-left-color: #4CAF50;
+        }
+        
+        .stat-card.max {
+            border-left-color: #f44336;
+        }
+        
+        .stat-card.distance {
+            border-left-color: #FF9800;
+        }
+        
+        .stat-card.duration {
+            border-left-color: #9C27B0;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #999;
+        }
+        
+        .charts-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        
+        .chart-container {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        /* ============================================================
+           Chat panel (left sidebar of main-grid)
+           ============================================================ */
+        .map-row {
+            display: block;
+        }
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border: 1px solid #e0e0e0;
+            height: 720px;
+            overflow: hidden;
+        }
+        .chat-header {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e0e0e0;
+            font-weight: 600;
+            font-size: 14px;
+            background: white;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chat-presence {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex: 1;
+            min-height: 14px;
+        }
+        .presence-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            cursor: default;
+            transition: opacity 0.4s ease;
+        }
+        .chat-refresh {
+            background: none;
+            border: none;
+            color: #6b7280;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            line-height: 1.2;
+        }
+        .chat-refresh:hover { background: #f3f4f6; color: #111827; }
+        .chat-refresh.spinning svg { animation: chat-spin 0.8s linear infinite; }
+        @keyframes chat-spin { to { transform: rotate(360deg); } }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            display: flex;
+            flex-direction: column-reverse;
+            font-size: 13px;
+            gap: 6px;
+        }
+        .msg {
+            border-radius: 6px;
+            padding: 6px 8px;
+            line-height: 1.3;
+            word-wrap: break-word;
+        }
+        .msg.rx {
+            background: #E3F2FD;
+            border-left: 3px solid #2196F3;
+        }
+        .msg.tx {
+            background: #E8F5E9;
+            border-left: 3px solid #43A047;
+        }
+        .msg .meta {
+            font-size: 10px;
+            color: #777;
+            margin-top: 2px;
+        }
+        .msg.pending { opacity: 0.6; }
+        .msg.failed  { background: #FFEBEE; border-left-color: #E53935; }
+        .chat-compose {
+            display: flex;
+            gap: 6px;
+            padding: 8px;
+            border-top: 1px solid #e0e0e0;
+            background: white;
+        }
+        .chat-compose input {
+            flex: 1;
+            padding: 7px 9px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        .chat-compose input:focus {
+            outline: none;
+            border-color: #2196F3;
+        }
+        .chat-compose button {
+            padding: 7px 14px;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .chat-compose button:hover    { background: #1976D2; }
+        .chat-compose button:disabled { background: #bbb; cursor: not-allowed; }
+        .chat-counter {
+            font-size: 10px;
+            color: #999;
+            text-align: right;
+            padding: 0 10px 4px;
+            background: white;
+        }
+        .map-area {
+            flex: 1;
+            min-width: 0;
+        }
+        .map-area #map { height: 500px; }
+
+        /* Per-message context menu (long-press on touch, right-click desktop) */
+        .msg { user-select: none; -webkit-user-select: none; cursor: pointer; }
+        .msg.selected { outline: 2px solid #2196F3; }
+        .msg-menu {
+            position: fixed;
+            z-index: 1000;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+            min-width: 130px;
+            font-size: 13px;
+            overflow: hidden;
+        }
+        .msg-menu button {
+            display: block;
+            width: 100%;
+            padding: 9px 14px;
+            margin: 0;
+            border: none;
+            background: white;
+            color: #333;
+            text-align: left;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: inherit;
+            border-radius: 0;
+            transition: none;
+            box-shadow: none;
+        }
+        .msg-menu button:hover  { background: #f0f0f0; color: #333; }
+        .msg-menu button.danger          { color: #d32f2f; }
+        .msg-menu button.danger:hover    { color: #d32f2f; background: #fff1f1; }
+        .msg-toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 13px;
+            z-index: 1100;
+            opacity: 0;
+            transition: opacity 0.18s;
+            pointer-events: none;
+        }
+        .msg-toast.show { opacity: 1; }
+        
+        .chart-wrapper {
+            position: relative;
+            height: 300px;
+        }
+        
+        .extremes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .extreme-trip {
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .extreme-trip.fastest {
+            border-color: #f44336;
+            background: #FFEBEE;
+        }
+        
+        .extreme-trip.slowest {
+            border-color: #4CAF50;
+            background: #E8F5E9;
+        }
+        
+        .trip-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            font-size: 13px;
+        }
+        
+        .trip-label {
+            color: #666;
+        }
+        
+        .trip-value {
+            font-weight: bold;
+        }
+        
+        .extreme-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .panel h3 {
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 14px;
+        }
+        
+        .stat-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        
+        .small-stat {
+            text-align: center;
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+        
+        .small-stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2196F3;
+        }
+        
+        .small-stat-label {
+            font-size: 11px;
+            color: #999;
+            margin-top: 5px;
+        }
+        
+        .trips-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .trip-item {
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 12px;
+            position: relative;
+        }
+        
+        .trip-item:hover {
+            background: #f5f5f5;
+            border-color: #2196F3;
+        }
+        
+        .trip-item.active {
+            background: #E3F2FD;
+            border-color: #2196F3;
+        }
+
+        .trip-delete-btn {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            background: #ff5252;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 2px 6px;
+            font-size: 11px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.15s;
+            line-height: 1.4;
+        }
+        /* Desktop: show on hover */
+        .trip-item:hover .trip-delete-btn {
+            opacity: 1;
+        }
+        /* Mobile: always show */
+        @media (hover: none) {
+            .trip-delete-btn {
+                opacity: 0.7;
+            }
+        }
+        
+        .trip-date {
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 3px;
+        }
+        
+        .trip-distance {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 3px;
+        }
+        
+        .trip-time {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .trip-device {
+            display: inline-block;
+            font-size: 10px;
+            background: #e8f4fd;
+            color: #1976D2;
+            border-radius: 3px;
+            padding: 1px 5px;
+            margin-top: 3px;
+            font-family: monospace;
+        }
+
+        .trip-journey-tag {
+            display: inline-block;
+            font-size: 10px;
+            background: #f3e5f5;
+            color: #7B1FA2;
+            border-radius: 3px;
+            padding: 1px 5px;
+            margin-top: 3px;
+            margin-left: 3px;
+        }
+
+        .trip-actions-row {
+            display: none;
+            gap: 3px;
+            margin-top: 5px;
+            flex-wrap: wrap;
+        }
+        .trip-item:hover .trip-actions-row {
+            display: flex;
+        }
+        @media (hover: none) {
+            .trip-actions-row { display: flex; }
+        }
+
+        .trip-action-btn {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #ccc;
+            background: white;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .trip-action-btn:hover { background: #f5f5f5; }
+        .trip-action-btn.start  { border-color:#9C27B0; color:#9C27B0; }
+        .trip-action-btn.add    { border-color:#4CAF50; color:#388E3C; }
+        .trip-action-btn.end    { border-color:#FF5722; color:#E64A19; }
+        .trip-action-btn.type   { border-color:#2196F3; color:#1565C0; }
+
+        #buildingBanner {
+            display: none;
+            background: #f3e5f5;
+            border: 1px solid #9C27B0;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: #6A1B9A;
+        }
+        #buildingBanner strong { color: #4A148C; }
+
+        .journey-card {
+            border: 1px solid #CE93D8;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #FAFAFA;
+            cursor: pointer;
+        }
+        .journey-card:hover { background: #f3e5f5; }
+        .journey-card.active { background: #EDE7F6; border-color: #9C27B0; }
+        .journey-name {
+            font-weight: bold;
+            font-size: 13px;
+            color: #4A148C;
+            cursor: text;
+        }
+        .journey-stats { font-size: 11px; color: #666; margin-top: 3px; }
+        .journey-trips-list { font-size: 11px; color: #888; margin-top: 4px; }
+        
+        .trip-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 5px;
+        }
+        
+        .trip-actions button {
+            padding: 4px 8px;
+            font-size: 11px;
+            flex: 1;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+            font-style: italic;
+        }
+        
+        @media (max-width: 1200px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .charts-row {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            header {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .stat-cards {
+                grid-template-columns: repeat(4, 1fr);
+            }
+
+            /* On mobile the 3-col grid is already collapsed to 1-col
+               by the 1200px breakpoint; just shorten the chat panel
+               so it doesn't dominate the viewport above the map. */
+            .chat-panel { height: 320px; }
+            .map-area #map { height: 380px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🗺️ Trip Hub</h1>
+            <!-- Global device filter. Lives in the page header so it
+                 reads as a top-level "what am I looking at?" control,
+                 not as a per-tab filter. Same controller as before
+                 (toggleDevicePicker / pickDevice). -->
+            <div class="device-picker" id="devicePickerBox">
+                <button type="button" class="device-picker-btn"
+                        onclick="toggleDevicePicker(event)">
+                    <span class="all-swatches" id="devicePickerSwatches"></span>
+                    <span id="devicePickerLabel" class="device-picker-label">All</span>
+                    <span class="device-picker-arrow">▾</span>
+                </button>
+                <div class="device-picker-menu" id="devicePickerMenu" hidden></div>
+            </div>
+        </header>
+        
+        <div class="main-grid">
+            <!-- Left sidebar: Chat -->
+            <div class="left-sidebar">
+                <div class="chat-panel">
+                    <div class="chat-header">
+                        <span>💬 Chat</span>
+                        <span class="chat-presence" id="chatPresence"></span>
+                        <button type="button" class="chat-refresh"
+                                id="chatRefreshBtn"
+                                onclick="probeAndRefreshPresence()"
+                                title="Re-probe devices over LoRa">
+                            <svg width="14" height="14" viewBox="0 0 24 24"
+                                 fill="none" stroke="currentColor"
+                                 stroke-width="2" stroke-linecap="round"
+                                 stroke-linejoin="round" style="vertical-align:middle">
+                                <polyline points="23 4 23 10 17 10"/>
+                                <polyline points="1 20 1 14 7 14"/>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10
+                                         M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="chat-messages" id="chatMessages"></div>
+                    <div class="chat-counter" id="chatCounter">200</div>
+                    <div class="chat-compose">
+                        <input type="text" id="chatInput"
+                               placeholder="Type a message…"
+                               maxlength="200"
+                               autocomplete="off">
+                        <button id="chatSendBtn">Send</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="main-content">
+                <!-- Profile Tabs + Journeys (device picker now lives in
+                     the page header so it acts as a global filter). -->
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:15px; border-bottom:2px solid #eee;">
+                    <div class="profile-tabs" id="profileTabs"></div>
+                    <button class="profile-tab" id="journeysTab"
+                            onclick="selectJourneys()"
+                            style="border-color:#9C27B0; color:#9C27B0; margin-left:auto;">
+                        🗺️ Journeys
+                    </button>
+                </div>
+                
+                <!-- View Tabs (Map / Speed Distribution / Speed Trend / Activity) -->
+                <div class="view-tabs">
+                    <button class="view-tab active" onclick="switchView(event,'map')">🗺️ Map</button>
+                    <button class="view-tab" onclick="switchView(event,'distribution')">📊 Speed Distribution</button>
+                    <button class="view-tab" onclick="switchView(event,'trend')">📈 Speed Trend</button>
+                    <button class="view-tab view-tab-right" onclick="switchView(event,'activity')">📜 Activity Log</button>
+                </div>
+                
+                <!-- Views Container -->
+                <div class="views-container">
+                    <!-- Map View -->
+                    <div id="map-view" class="view active">
+                        <div class="map-area">
+                            <div id="map" style="border-radius: 4px;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Speed Distribution View -->
+                    <div id="distribution-view" class="view">
+                        <div class="stats-grid" id="statsGrid"></div>
+                        <div class="charts-row">
+                            <div class="chart-container">
+                                <h4 style="margin-bottom: 10px;">📊 Speed Distribution</h4>
+                                <div class="chart-wrapper">
+                                    <canvas id="distributionChart"></canvas>
+                                </div>
+                                <div style="font-size: 11px; color: #999; margin-top: 10px;" id="distNote"></div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 20px;">
+                            <h4 style="margin-bottom: 15px;">🏆 Fastest & Slowest Trips</h4>
+                            <div class="extremes-grid" id="extremesContainer"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Speed Trend View -->
+                    <div id="trend-view" class="view">
+                        <div class="stats-grid" id="statsGrid2"></div>
+                        <div class="charts-row">
+                            <div class="chart-container">
+                                <h4 style="margin-bottom: 10px;">📈 Speed Trend (Daily)</h4>
+                                <div class="chart-wrapper">
+                                    <canvas id="trendChart"></canvas>
+                                </div>
+                                <div style="font-size: 11px; color: #999; margin-top: 10px;" id="trendNote"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Activity View -->
+                    <div id="activity-view" class="view">
+                        <div style="display:flex; gap:6px; margin-bottom:8px; align-items:center; flex-wrap:wrap;">
+                            <button class="filter-pill active" data-filter="">All</button>
+                            <button class="filter-pill" data-filter="GPS">GPS</button>
+                            <button class="filter-pill" data-filter="SYN">SYNC</button>
+                            <button class="filter-pill" data-filter="RX ">RX</button>
+                            <button class="filter-pill" data-filter="TX ">TX</button>
+                            <button class="filter-pill" data-filter="ERR">ERR</button>
+                            <span id="activityHint" style="font-size:.85em; color:#888; margin-left:8px;">loading…</span>
+                        </div>
+                        <pre id="activityLog" style="
+                            font-family: 'Menlo','Consolas',monospace;
+                            font-size: 12px; line-height: 1.4;
+                            background: #fafafa; border: 1px solid #e5e7eb;
+                            border-radius: 4px; padding: 10px;
+                            max-height: 640px; overflow: auto;
+                            white-space: pre-wrap; word-break: break-all;
+                            margin: 0;"></pre>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <!-- Statistics Panel (start/end + quick presets, no heading) -->
+                <div class="panel">
+                    <div class="range-inputs">
+                        <input type="date" id="customFrom" onchange="onRangeChange()">
+                        <span class="range-sep" aria-hidden="true">━</span>
+                        <input type="date" id="customTo"   onchange="onRangeChange()">
+                    </div>
+                    <div class="quick-row" id="quickRow">
+                        <button type="button" class="quick-btn" data-key="today"     onclick="setQuickRange('today')">Today</button>
+                        <button type="button" class="quick-btn" data-key="yesterday" onclick="setQuickRange('yesterday')">Yesterday</button>
+                        <button type="button" class="quick-btn" data-key="week"      onclick="setQuickRange('week')">Week</button>
+                        <button type="button" class="quick-btn" data-key="month"     onclick="setQuickRange('month')">Month</button>
+                        <button type="button" class="quick-btn" data-key="year"      onclick="setQuickRange('year')">Year</button>
+                    </div>
+                    <div class="stat-cards">
+                        <div class="small-stat">
+                            <div class="small-stat-value" id="statTrips">0</div>
+                            <div class="small-stat-label">Trips</div>
+                        </div>
+                        <div class="small-stat">
+                            <div class="small-stat-value" id="statDistance">0</div>
+                            <div class="small-stat-label">km</div>
+                        </div>
+                        <div class="small-stat">
+                            <div class="small-stat-value" id="statDuration">0</div>
+                            <div class="small-stat-label">hours</div>
+                        </div>
+                        <div class="small-stat">
+                            <div class="small-stat-value" id="statAvg">0</div>
+                            <div class="small-stat-label">km/trip</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Trips Panel -->
+                <div class="panel">
+                    <h3 id="tripsPanelTitle">Trips</h3>
+                    <div id="buildingBanner">
+                        🗺️ Building journey: <strong id="buildingCount">0</strong> trip(s) selected
+                        &nbsp;·&nbsp;
+                        <a href="#" onclick="cancelJourney(); return false;"
+                           style="color:#9C27B0;">Cancel</a>
+                    </div>
+                    <div class="trips-list" id="tripsList">
+                        <div class="loading">Loading...</div>
+                    </div>
+                    <div class="trips-list" id="journeysList" style="display:none">
+                        <div class="loading">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script>
+        let map;
+        let currentProfile = null;
+        let allProfiles = [];
+        let currentTrip = null;
+        let polylines = [];
+        let markers = [];
+
+        // ----- Phase 2: per-trip polyline registry for hover/click-to-pop -----
+        // tripPolylines maps trip_id -> {line: L.Polyline, coords, dashArray}.
+        // activeTripId is the trip currently popped out (full opacity + thick).
+        let tripPolylines = {};
+        let activeTripId  = null;
+
+        // Movement type is now encoded via dash pattern, freeing colour
+        // to encode device identity consistently across the whole UI
+        // (mini-swatches in the picker, dropdown rows, map markers,
+        // chat presence dots, and the polylines themselves).
+        //
+        //   walking → short dashes        - - - -
+        //   cycling → long dashes         ── ── ──
+        //   driving / other → solid       ──────────
+        function typeDashArray(movementType) {
+            switch (movementType) {
+                case 'walking': return '4 5';
+                case 'cycling': return '10 5';
+                default:        return null;   // driving + unknown
+            }
+        }
+
+        // ----- Trip focus / hover state machine -----
+        // Track which trips have already been auto-zoomed to so we
+        // don't re-fit the viewport every time the user clicks the
+        // same trip after zooming/panning in to a detail. Reset when
+        // the map is rebuilt (clearMap clears it).
+        let trippedFitOnce = new Set();
+
+        function setTripStyle(tripId, opacity, weight) {
+            const item = tripPolylines[tripId];
+            if (!item) return;
+            // Restyle every segment of the trip — a polyline split by
+            // GPS dropouts can be multiple Leaflet objects.
+            const segs = item.segments || [item.line];
+            for (const s of segs) {
+                s.setStyle({opacity, weight});
+                if (opacity >= 1.0) s.bringToFront();
+            }
+        }
+
+        function unfocusActive() {
+            if (activeTripId == null) return;
+            setTripStyle(activeTripId, 0.25, 2);
+            const el = document.querySelector(
+                `.trip-item[data-trip-id="${activeTripId}"]`);
+            if (el) el.classList.remove('active');
+            activeTripId = null;
+        }
+
+        function focusTrip(tripId) {
+            if (activeTripId === tripId) {  // toggle off
+                unfocusActive();
+                return;
+            }
+            unfocusActive();
+            const item = tripPolylines[tripId];
+            if (!item) return;
+            setTripStyle(tripId, 1.0, 5);
+            // Auto-zoom to the trip only the FIRST time it's selected
+            // in this map view. Subsequent clicks just re-highlight
+            // without disturbing whatever the user zoomed / panned to.
+            // clearMap() resets the set, so a new trip list / refresh
+            // starts fresh.
+            if (!trippedFitOnce.has(tripId)) {
+                map.fitBounds(item.coords, {padding: [40, 40]});
+                trippedFitOnce.add(tripId);
+            }
+            activeTripId = tripId;
+            const el = document.querySelector(
+                `.trip-item[data-trip-id="${tripId}"]`);
+            if (el) el.classList.add('active');
+        }
+
+        function hoverTrip(tripId, on) {
+            if (tripId === activeTripId) return;
+            setTripStyle(tripId, on ? 0.6 : 0.25, on ? 3 : 2);
+        }
+
+        // ----- Filter state (persisted to localStorage) -----
+        let currentDevice = localStorage.getItem('tripHubDevice') || '';
+        let customFrom    = localStorage.getItem('tripHubFrom') || '';
+        let customTo      = localStorage.getItem('tripHubTo')   || '';
+
+        // First-time default: last 7 days through today.
+        if (!customFrom || !customTo) {
+            const today = new Date();
+            const weekAgo = new Date(today.getTime() - 6 * 86400000);
+            customFrom = weekAgo.toISOString().slice(0, 10);
+            customTo   = today.toISOString().slice(0, 10);
+        }
+
+        // Build the from/to + device query string used by all filtered
+        // endpoints. `to` is exclusive on the server; we add a day so the
+        // user-selected end date is included in the window.
+        function windowParams() {
+            const p = new URLSearchParams();
+            // Accept partial ranges: from-only ('everything since X') and
+            // to-only ('everything up to Y') are valid server-side. Don't
+            // silently drop user input when only one field is set.
+            if (customFrom) p.set('from', customFrom);
+            if (customTo) {
+                // Server treats `to` as exclusive, so we want
+                // (customTo + 1 day). Do it in UTC to avoid the
+                // local-tz vs UTC clipping that drops the +1 in any
+                // timezone east of UTC: `new Date('2026-05-08T00:00:00')`
+                // in CEST is 2026-05-07 22:00 UTC; +1 day = 2026-05-08
+                // 22:00 UTC; toISOString().slice(0,10) = '2026-05-08' —
+                // same date, today's trips silently excluded.
+                const [y, m, d] = customTo.split('-').map(Number);
+                const next = new Date(Date.UTC(y, m - 1, d + 1));
+                p.set('to', next.toISOString().slice(0, 10));
+            }
+            if (currentDevice) p.set('device_id', currentDevice);
+            return p.toString();
+        }
+
+        function apiUrl(path, extra) {
+            const p = new URLSearchParams(windowParams());
+            if (extra) for (const k in extra) {
+                const v = extra[k];
+                if (v !== null && v !== undefined && v !== '') p.set(k, v);
+            }
+            return path + '?' + p.toString();
+        }
+
+        // Variant that strips the device_id filter — used for the trips
+        // map polylines, which should always show every device's lines
+        // regardless of which device is selected in the header picker.
+        // Colour-per-device already keeps them visually distinct, so the
+        // map is a 'big picture' view; the picker affects live markers,
+        // presence dots and sync triggers but not what's drawn on the
+        // map.
+        function apiUrlAllDevices(path, extra) {
+            const p = new URLSearchParams(windowParams());
+            p.delete('device_id');
+            if (extra) for (const k in extra) {
+                const v = extra[k];
+                if (v !== null && v !== undefined && v !== '') p.set(k, v);
+            }
+            return path + '?' + p.toString();
+        }
+
+        // Journey building state
+        let journeyBuilding = false;   // are we in building mode?
+        let journeyTrips    = [];      // trip_ids selected so far
+        let allJourneys     = [];      // loaded from server
+        let currentJourney  = null;    // selected journey id for map display
+        let viewingJourneys = false;   // true when Journeys tab is active
+        let distributionChart = null;
+        let trendChart = null;
+
+        // ---- Live GPS (real-time stream from LoRa) ----
+        let liveMarkers = {};         // {device_id: L.circleMarker}, one per device
+        let liveCenteredOnce = false; // recenter map only on first fix
+
+        // ---- Per-device colours + tombstones + user-added (localStorage) ----
+        let deviceColors   = JSON.parse(localStorage.getItem('tripHubDeviceColors')   || '{}');
+        let deletedDevices = JSON.parse(localStorage.getItem('tripHubDeletedDevices') || '[]');
+        // user-added device ids that don't have any trips yet — appear in the
+        // dropdown immediately so the user can pre-configure colour, etc.
+        let addedDevices   = JSON.parse(localStorage.getItem('tripHubAddedDevices')   || '[]');
+
+        function defaultDeviceColor(deviceId) {
+            // Stable HSL hash so the same device gets the same colour every
+            // boot until the user overrides it.
+            if (!deviceId) return '#666666';
+            let h = 0;
+            for (let i = 0; i < deviceId.length; i++) {
+                h = ((h << 5) - h + deviceId.charCodeAt(i)) | 0;
+            }
+            const hue = Math.abs(h) % 360;
+            return hslToHex(hue, 65, 48);
+        }
+        function hslToHex(h, s, l) {
+            s /= 100; l /= 100;
+            const k = n => (n + h / 30) % 12;
+            const a = s * Math.min(l, 1 - l);
+            const f = n => Math.round(255 *
+                (l - a * Math.max(-1, Math.min(k(n)-3, Math.min(9-k(n), 1)))));
+            return '#' + [f(0), f(8), f(4)]
+                .map(x => x.toString(16).padStart(2,'0')).join('');
+        }
+        function colorForDevice(deviceId) {
+            return deviceColors[deviceId] || defaultDeviceColor(deviceId);
+        }
+
+        // Per-device map pin: classic teardrop shape, fill = device colour,
+        // small white inner dot for legibility against the road tiles.
+        function makePinIcon(color) {
+            const svg =
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32"' +
+                ' width="24" height="32">' +
+                '<path d="M12 0C5.4 0 0 5.4 0 12c0 8 12 20 12 20s12-12 12-20' +
+                'C24 5.4 18.6 0 12 0z"' +
+                ' fill="' + color + '"' +
+                ' stroke="rgba(0,0,0,0.25)" stroke-width="0.5"/>' +
+                '<circle cx="12" cy="12" r="4" fill="white"/>' +
+                '</svg>';
+            return L.divIcon({
+                className: 'device-pin',
+                html: svg,
+                iconSize:    [24, 32],
+                iconAnchor:  [12, 32],   // tip of the teardrop = the actual point
+                popupAnchor: [0, -28],
+            });
+        }
+        
+        function initMap() {
+            if (map) return;
+            // Neutral world view as the fallback; we re-center below as
+            // soon as we know where the user actually is. fitBounds on
+            // selected-profile trips runs later and overrides this if it
+            // has data.
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
+
+            // Re-center on the most recent live point so we don't land on
+            // the wrong continent if the selected profile has no trips in
+            // the timeframe. Only acts while map is still at the default
+            // zoom — anything that fitBounds first wins.
+            fetch('/api/live?latest=1')
+                .then(r => r.json())
+                .then(data => {
+                    const p = data && data.latest;
+                    if (p && typeof p.lat === 'number'
+                        && typeof p.lon === 'number'
+                        && map.getZoom() <= 2) {
+                        map.setView([p.lat, p.lon], 13);
+                        liveCenteredOnce = true;  // suppress duplicate
+                                                  // re-center in live poll
+                    }
+                })
+                .catch(() => {});
+        }
+        
+        function switchView(event, view) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(view + '-view').classList.add('active');
+            event.target.classList.add('active');
+
+            if (view === 'map') {
+                setTimeout(() => map.invalidateSize(), 100);
+            }
+            if (view === 'activity') activityStart();
+            else                     activityStop();
+        }
+
+        // ---- Activity (tail of Hub_Server's picoA_serial.log) ----
+        let activityFilter = '';
+        let activityPoll   = null;
+
+        function activityFetch() {
+            const params = new URLSearchParams({lines: '300'});
+            if (activityFilter) params.set('filter', activityFilter);
+            // Device picker is shared with the rest of the UI — when a
+            // device is selected, scope the log to that device too.
+            if (currentDevice) params.set('device', currentDevice);
+            fetch('/api/activity?' + params.toString())
+                .then(r => r.json())
+                .then(d => {
+                    const log = document.getElementById('activityLog');
+                    const hint = document.getElementById('activityHint');
+                    if (d.error) {
+                        hint.textContent = 'error: ' + d.error +
+                                           (d.path ? ' (' + d.path + ')' : '');
+                        log.textContent = '';
+                        return;
+                    }
+                    const lines = d.lines || [];
+                    log.textContent = lines.join('\n');
+                    log.scrollTop = log.scrollHeight;  // newest at bottom
+                    const parts = [lines.length + ' lines'];
+                    if (activityFilter) parts.push('type=' + activityFilter.trim());
+                    if (currentDevice)  parts.push('device=' + currentDevice);
+                    hint.textContent = parts.join(' · ');
+                })
+                .catch(e => {
+                    document.getElementById('activityHint').textContent =
+                        'fetch failed';
+                });
+        }
+
+        function activityStart() {
+            activityFetch();
+            if (activityPoll) clearInterval(activityPoll);
+            activityPoll = setInterval(activityFetch, 5000);
+        }
+
+        function activityStop() {
+            if (activityPoll) { clearInterval(activityPoll); activityPoll = null; }
+        }
+
+        document.addEventListener('click', e => {
+            if (e.target.matches('.filter-pill')) {
+                activityFilter = e.target.dataset.filter || '';
+                document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                activityFetch();
+            }
+        });
+        
+        function loadAllData() {
+            fetch('/api/profiles').then(r => r.json()).then(profiles => {
+                allProfiles = profiles;
+                updateProfileTabs();
+                if (currentProfile) {
+                    loadProfileData(currentProfile);
+                } else if (viewingJourneys) {
+                    loadJourneys();
+                } else {
+                    // Default view on page load / Ctrl+R: no movement-type
+                    // filter applied. Filtering only kicks in once the
+                    // user clicks one of the Walking / Cycling / Driving
+                    // tabs explicitly.
+                    loadAllTypes();
+                }
+            }).catch(e => console.error('Error:', e));
+        }
+
+        function loadAllTypes() {
+            // No profile filter on the map. Picker drives the panel +
+            // stats only — map keeps showing every device's polylines.
+            fetch(apiUrlAllDevices('/api/recent'))
+                .then(r => r.json()).then(trips => {
+                    // Visible = device-filtered when picker is set; map
+                    // gets the full list, panel + stats get the filtered
+                    // one so the count next to the list always matches.
+                    const visible = currentDevice
+                        ? trips.filter(t => t.device_id === currentDevice)
+                        : trips;
+                    updateAggregateStats(visible);
+                    updateTripsMap(trips);
+                    updateTripsPanel(visible);
+                }).catch(e => console.error('Error loading all-types:', e));
+        }
+
+        function updateAggregateStats(trips) {
+            // Compute from the visible (already device-filtered) trips
+            // array so the sidebar counters always match the list below.
+            let count = 0, km = 0, hours = 0;
+            for (const t of (trips || [])) {
+                count += 1;
+                km    += (t.distance_km || 0);
+                hours += ((t.duration_seconds || 0) / 3600);
+            }
+            const perTrip = km / Math.max(1, count);
+            const fill = `
+                <div class="stat-card"><div class="stat-value">${count}</div><div class="stat-label">Trips</div></div>
+                <div class="stat-card distance"><div class="stat-value">${km.toFixed(1)}</div><div class="stat-label">km</div></div>
+                <div class="stat-card duration"><div class="stat-value">${hours.toFixed(1)}</div><div class="stat-label">hours</div></div>
+                <div class="stat-card avg"><div class="stat-value">${perTrip.toFixed(1)}</div><div class="stat-label">km/trip</div></div>`;
+            const g  = document.getElementById('statsGrid');
+            const g2 = document.getElementById('statsGrid2');
+            if (g)  g.innerHTML  = fill;
+            if (g2) g2.innerHTML = fill;
+        }
+        
+        function updateProfileTabs() {
+            const tabs = document.getElementById('profileTabs');
+            tabs.innerHTML = allProfiles.map(p => `
+                <button class="profile-tab ${p.id === currentProfile ? 'active' : ''}"
+                        style="border-color: ${p.color}"
+                        onclick="selectProfile('${p.id}')">
+                    ${p.icon} ${p.name}
+                </button>
+            `).join('');
+        }
+        
+        function loadProfileData(profileId, fitMap = false) {
+            // Stats panels respect the picker (device-scoped numbers
+            // make sense for 'how much did THIS device walk'), but the
+            // map polylines + the trips list go through apiUrlAllDevices
+            // so every device's lines stay visible after a picker change.
+            Promise.all([
+                fetch(apiUrl('/api/stats')).then(r => r.json()),
+                fetch(apiUrl(`/api/stats/${profileId}/distribution`)).then(r => r.json()),
+                fetch(apiUrl(`/api/stats/${profileId}/extremes`)).then(r => r.json()),
+                fetch(apiUrl(`/api/stats/${profileId}/trend`)).then(r => r.json()),
+                fetch(apiUrlAllDevices('/api/recent', {profile_id: profileId})).then(r => r.json())
+            ]).then(([stats, dist, extremes, trend, trips]) => {
+                updateStats(profileId, stats);
+                updateTripsMap(trips, fitMap);
+                updateDistribution(dist, extremes);
+                updateTrend(trend);
+                updateTripsPanel(trips);
+            }).catch(e => console.error('Error loading data:', e));
+        }
+        
+        function updateStats(profileId, stats) {
+            const s = stats[profileId] || {trip_count: 0, total_distance_km: 0, total_duration_hours: 0};
+            document.getElementById('statTrips').textContent = s.trip_count;
+            document.getElementById('statDistance').textContent = s.total_distance_km.toFixed(1);
+            document.getElementById('statDuration').textContent = s.total_duration_hours.toFixed(1);
+            document.getElementById('statAvg').textContent = (s.total_distance_km / Math.max(1, s.trip_count)).toFixed(1);
+            
+            // Update stats in distribution/trend views
+            const grid2 = document.getElementById('statsGrid2');
+            grid2.innerHTML = document.getElementById('statsGrid').innerHTML || `
+                <div class="stat-card"><div class="stat-value">${s.trip_count}</div><div class="stat-label">Trips</div></div>
+                <div class="stat-card distance"><div class="stat-value">${s.total_distance_km.toFixed(1)}</div><div class="stat-label">km</div></div>
+                <div class="stat-card duration"><div class="stat-value">${s.total_duration_hours.toFixed(1)}</div><div class="stat-label">hours</div></div>
+                <div class="stat-card avg"><div class="stat-value">⌀ ${s.avg_speed_kmh?.toFixed(1) || '0'}</div><div class="stat-label">avg km/h</div></div>
+                <div class="stat-card max"><div class="stat-value">↑ ${s.max_speed_kmh?.toFixed(1) || '0'}</div><div class="stat-label">max km/h</div></div>
+            `;
+            
+            const grid = document.getElementById('statsGrid');
+            grid.innerHTML = `
+                <div class="stat-card"><div class="stat-value">${s.trip_count}</div><div class="stat-label">Trips</div></div>
+                <div class="stat-card distance"><div class="stat-value">${s.total_distance_km.toFixed(1)}</div><div class="stat-label">km</div></div>
+                <div class="stat-card duration"><div class="stat-value">${s.total_duration_hours.toFixed(1)}</div><div class="stat-label">hours</div></div>
+                <div class="stat-card avg"><div class="stat-value">⌀ ${s.avg_speed_kmh?.toFixed(1) || '0'}</div><div class="stat-label">avg km/h</div></div>
+                <div class="stat-card max"><div class="stat-value">↑ ${s.max_speed_kmh?.toFixed(1) || '0'}</div><div class="stat-label">max km/h</div></div>
+            `;
+        }
+        
+        function updateTripsMap(trips, fitMap = false) {
+            // Preserve which trip was popped out so the 30 s background
+            // refresh doesn't yank the user's view.
+            const wasActive = activeTripId;
+            clearMap();
+            // Picker filter: when a specific device is selected, the map
+            // shows only that device's polylines (matching the trips
+            // panel). 'All' shows everyone, coloured per device.
+            if (currentDevice && trips) {
+                trips = trips.filter(t => t.device_id === currentDevice);
+            }
+            if (!trips || trips.length === 0) return;
+
+            const allCoords = [];
+            const tripPromises = trips.map(trip =>
+                fetch(`/api/trips/${trip.id}`).then(r => r.json()).then(details => {
+                    if (!details.points || details.points.length === 0) return;
+                    const rawCoords = details.points.map(p => [p.lat, p.lon]);
+                    const rawTs     = details.points.map(p => p.timestamp);
+                    // Outlier filter disabled — the detour-ratio
+                    // heuristic can't distinguish multipath spikes
+                    // from legitimate road curves (roundabouts, sharp
+                    // turns), so it ate roundabout fixes. Proper fix
+                    // would be snap-to-road via an external service.
+                    const coords = rawCoords;
+                    const tsArr  = rawTs;
+                    // Colour = device identity (consistent across the whole
+                    // UI — picker swatches, dropdown rows, map markers).
+                    // Dash pattern = movement type (walking / cycling /
+                    // driving). The two signals can be read independently:
+                    // 'red dashed line' = device-red, walking.
+                    const color     = colorForDevice(trip.device_id);
+                    const dashArray = typeDashArray(trip.movement_type);
+
+                    // Break the polyline whenever two consecutive fixes
+                    // are too far apart in time or distance — these are
+                    // GPS dropouts (tunnels, dense urban canyon, device
+                    // briefly out of sky view). The default behaviour
+                    // (one Polyline through all coords) draws a straight
+                    // line across the gap that cuts through buildings.
+                    // Splitting into segments leaves an honest gap.
+                    const GAP_S = 90;        // 90 s = ~1.5x driving cadence
+                    const GAP_M = 500;       // OR > 500 m between fixes
+                    const segments = polylineSegments(coords, tsArr,
+                                                      GAP_S, GAP_M);
+
+                    const segLines = [];
+                    for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+                        const seg = segments[segIdx];
+                        if (seg.length < 2) continue;
+                        const opts = {color, weight: 2, opacity: 0.25};
+                        if (dashArray) opts.dashArray = dashArray;
+                        const sline = L.polyline(seg, opts).addTo(map);
+                        sline.tripId = trip.id;
+                        sline.on('click', () => focusTrip(trip.id));
+                        // Bind the hover tooltip ONLY on the first segment.
+                        // Multi-tooltip-per-trip leaks artefacts and slows
+                        // down rapid mouse moves across gap boundaries.
+                        // The first segment's tooltip walks the full
+                        // tsArr/coords so 'nearest fix time' is correct
+                        // even when the cursor is over a later segment —
+                        // and Leaflet routes mouseover to whichever
+                        // layer is under the cursor regardless of which
+                        // one carries the tooltip binding.
+                        if (segIdx === 0) {
+                            sline.bindTooltip('', {sticky: true,
+                                                   direction: 'top',
+                                                   opacity: 0.92});
+                            sline.on('mousemove', e => {
+                                let bestIdx = 0, bestD = Infinity;
+                                const lat = e.latlng.lat, lng = e.latlng.lng;
+                                for (let i = 0; i < coords.length; i++) {
+                                    const dlat = coords[i][0] - lat;
+                                    const dlon = coords[i][1] - lng;
+                                    const d = dlat * dlat + dlon * dlon;
+                                    if (d < bestD) { bestD = d; bestIdx = i; }
+                                }
+                                sline.getTooltip()
+                                     .setContent(formatTripTime(tsArr[bestIdx]));
+                            });
+                        }
+                        polylines.push(sline);
+                        segLines.push(sline);
+                    }
+                    // Keep the trip-level entry pointing at the first
+                    // segment so hover/focus state still works the same
+                    // (setTripStyle only needs one handle). For multi-
+                    // segment trips we also stash the rest so focus can
+                    // restyle all of them in one call.
+                    if (segLines.length) {
+                        tripPolylines[trip.id] = {
+                            line:     segLines[0],
+                            segments: segLines,
+                            coords:   coords,
+                        };
+                    }
+                    allCoords.push(...coords);
+                })
+            );
+
+            Promise.all(tripPromises).then(() => {
+                // Re-apply pop-out on the previously-active trip if it's
+                // still in the new list (style only — leave the user's
+                // viewport alone on background refresh).
+                if (wasActive != null && tripPolylines[wasActive]) {
+                    setTripStyle(wasActive, 1.0, 5);
+                    activeTripId = wasActive;
+                    const el = document.querySelector(
+                        `.trip-item[data-trip-id="${wasActive}"]`);
+                    if (el) el.classList.add('active');
+                }
+                // Explicit fitMap (profile-tab click / new view) overrides
+                // the wasActive restore — user expects the map to zoom to
+                // the new content. Background refreshes still leave the
+                // viewport alone (they pass fitMap=false).
+                if (fitMap && allCoords.length > 0) {
+                    map.fitBounds(allCoords, {padding: [40, 40]});
+                }
+            });
+        }
+        
+        function updateDistribution(dist, extremes) {
+            const ctx = document.getElementById('distributionChart')?.getContext('2d');
+            if (!ctx) return;
+            
+            if (distributionChart) distributionChart.destroy();
+            
+            const profile = allProfiles.find(p => p.id === currentProfile);
+            const color = profile?.color || '#2196F3';
+            
+            distributionChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: dist.bins,
+                    datasets: [{
+                        label: 'Speed Points',
+                        data: dist.counts,
+                        backgroundColor: color + '40',
+                        borderColor: color,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {legend: {display: false}},
+                    scales: {y: {beginAtZero: true}}
+                }
+            });
+            
+            document.getElementById('distNote').textContent = 
+                `Median: ${dist.median_speed.toFixed(1)} km/h | Points: ${dist.total_points}`;
+            
+            const container = document.getElementById('extremesContainer');
+            let html = '';
+            if (extremes.fastest) {
+                html += `<div class="extreme-trip fastest">
+                    <div class="extreme-title">⚡ Fastest</div>
+                    <div class="trip-stat"><span>Max Speed:</span><span>↑ ${extremes.fastest.max_speed_kmh.toFixed(1)} km/h</span></div>
+                    <div class="trip-stat"><span>Avg Speed:</span><span>⌀ ${extremes.fastest.avg_speed_kmh.toFixed(1)} km/h</span></div>
+                    <div class="trip-stat"><span>Distance:</span><span>${extremes.fastest.distance_km.toFixed(1)} km</span></div>
+                    <div class="trip-stat"><span>Date:</span><span>${extremes.fastest.date}</span></div>
+                </div>`;
+            }
+            if (extremes.slowest) {
+                html += `<div class="extreme-trip slowest">
+                    <div class="extreme-title">🐢 Slowest</div>
+                    <div class="trip-stat"><span>Avg Speed:</span><span>⌀ ${extremes.slowest.avg_speed_kmh.toFixed(1)} km/h</span></div>
+                    <div class="trip-stat"><span>Max Speed:</span><span>↑ ${extremes.slowest.max_speed_kmh.toFixed(1)} km/h</span></div>
+                    <div class="trip-stat"><span>Distance:</span><span>${extremes.slowest.distance_km.toFixed(1)} km</span></div>
+                    <div class="trip-stat"><span>Date:</span><span>${extremes.slowest.date}</span></div>
+                </div>`;
+            }
+            container.innerHTML = html;
+        }
+        
+        function updateTrend(trend) {
+            const ctx = document.getElementById('trendChart')?.getContext('2d');
+            if (!ctx) return;
+            
+            if (trendChart) trendChart.destroy();
+            
+            const profile = allProfiles.find(p => p.id === currentProfile);
+            const color = profile?.color || '#2196F3';
+            
+            trendChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: trend.map(d => d.date),
+                    datasets: [
+                        {
+                            label: 'Daily Avg',
+                            data: trend.map(d => d.daily_avg_speed),
+                            borderColor: color,
+                            backgroundColor: color + '20',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Daily Max',
+                            data: trend.map(d => d.daily_max_speed),
+                            borderColor: color,
+                            borderDash: [5, 5],
+                            fill: false,
+                            tension: 0.4,
+                            pointRadius: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {legend: {position: 'top'}},
+                    scales: {y: {beginAtZero: true}}
+                }
+            });
+            
+            document.getElementById('trendNote').textContent = `${trend.length} days | Last: ${new Date().toLocaleTimeString()}`;
+        }
+        
+        function updateTripsPanel(trips) {
+            const list = document.getElementById('tripsList');
+            // The trips response covers every device (we fetch via
+            // apiUrlAllDevices so the map shows all polylines), but the
+            // side panel should respect the header picker — narrow the
+            // displayed list to the selected device. The map keeps
+            // showing everyone.
+            if (currentDevice && trips) {
+                trips = trips.filter(t => t.device_id === currentDevice);
+            }
+            if (!trips || trips.length === 0) {
+                list.innerHTML = '<div class="empty-state">No trips</div>';
+                return;
+            }
+
+            const typeIcons  = {walking:'🚶', cycling:'🚴', driving:'🚗'};
+            const typeLabels = {walking:'Walking', cycling:'Cycling', driving:'Driving'};
+
+            list.innerHTML = trips.map(trip => {
+                const inJourney = trip.journey_id != null;
+                const selected  = journeyBuilding && journeyTrips.includes(trip.id);
+                const border    = selected ? 'border:2px solid #9C27B0;' : '';
+                const jTag      = inJourney
+                    ? `<span class="trip-journey-tag">🗺️ journey</span>` : '';
+
+                // Journey action buttons depend on state
+                let jBtn = '';
+                if (journeyBuilding) {
+                    if (selected) {
+                        jBtn = `<button class="trip-action-btn end"
+                                  onclick="endJourneyAt(event,${trip.id})">⏹ End</button>
+                                <button class="trip-action-btn"
+                                  onclick="removeFromJourney(event,${trip.id})"
+                                  style="border-color:#999;color:#666;">✕ Remove</button>`;
+                    } else {
+                        jBtn = `<button class="trip-action-btn add"
+                                  onclick="addToJourney(event,${trip.id})">＋ Add</button>`;
+                    }
+                } else {
+                    jBtn = `<button class="trip-action-btn start"
+                              onclick="startJourney(event,${trip.id})">▶ Start journey</button>`;
+                    if (inJourney) {
+                        jBtn += `<button class="trip-action-btn"
+                                   onclick="removeFromJourneyDirect(event,${trip.id},${trip.journey_id})"
+                                   style="border-color:#999;color:#666;">✕ From journey</button>`;
+                    }
+                }
+
+                return `
+                <div class="trip-item ${currentTrip===trip.id?'active':''}"
+                     data-trip-id="${trip.id}"
+                     style="${border}"
+                     onclick="selectTrip(${trip.id})"
+                     onmouseenter="hoverTrip(${trip.id}, true)"
+                     onmouseleave="hoverTrip(${trip.id}, false)">
+                    <div class="trip-date">${new Date(trip.start_time).toLocaleDateString()}</div>
+                    <div class="trip-distance">${trip.distance_km?.toFixed(2)||'0'} km</div>
+                    <div class="trip-time">${Math.round((trip.duration_seconds||0)/60)} min</div>
+                    <div>
+                        ${trip.device_id?`<span class="trip-device">${trip.device_id}</span>`:''}
+                        ${jTag}
+                    </div>
+                    <div class="trip-actions-row">
+                        <select class="trip-action-btn type"
+                                onchange="changeType(event,${trip.id},this.value)"
+                                onclick="event.stopPropagation()">
+                            <option value="">✏️ ${typeIcons[trip.movement_type]||'?'} ${typeLabels[trip.movement_type]||trip.movement_type}</option>
+                            <option value="walking">🚶 Walking</option>
+                            <option value="cycling">🚴 Cycling</option>
+                            <option value="driving">🚗 Driving</option>
+                        </select>
+                        <button class="trip-action-btn"
+                                onclick="enterSplitMode(event,${trip.id})"
+                                style="border-color:#FF9800;color:#E65100;">✂️ Split</button>
+                        ${jBtn}
+                        <button class="trip-delete-btn" style="position:static;opacity:1;"
+                                onclick="deleteTrip(event,${trip.id})">✕</button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // ---- Journey building ----
+
+        function startJourney(event, tripId) {
+            event.stopPropagation();
+            journeyBuilding = true;
+            journeyTrips = [tripId];
+            updateBuildingBanner();
+            reloadCurrentPanel();
+        }
+
+        function addToJourney(event, tripId) {
+            event.stopPropagation();
+            if (!journeyTrips.includes(tripId)) journeyTrips.push(tripId);
+            updateBuildingBanner();
+            reloadCurrentPanel();
+        }
+
+        function removeFromJourney(event, tripId) {
+            event.stopPropagation();
+            journeyTrips = journeyTrips.filter(id => id !== tripId);
+            updateBuildingBanner();
+            reloadCurrentPanel();
+        }
+
+        function endJourneyAt(event, tripId) {
+            event.stopPropagation();
+            if (!journeyTrips.includes(tripId)) journeyTrips.push(tripId);
+            const name = prompt('Name this journey:', 'Journey ' + new Date().toLocaleDateString());
+            if (!name) return;
+            fetch('/api/journeys', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({name, trip_ids: journeyTrips})
+            }).then(r => r.json()).then(() => {
+                journeyBuilding = false;
+                journeyTrips = [];
+                updateBuildingBanner();
+                loadJourneys();
+                reloadCurrentPanel();
+            });
+        }
+
+        function cancelJourney() {
+            journeyBuilding = false;
+            journeyTrips = [];
+            updateBuildingBanner();
+            reloadCurrentPanel();
+        }
+
+        function removeFromJourneyDirect(event, tripId, journeyId) {
+            event.stopPropagation();
+            fetch(`/api/journeys/${journeyId}/trips/${tripId}`, {method:'DELETE'})
+                .then(r => {
+                    if (!r.ok) {
+                        return r.json().catch(()=>({})).then(d =>
+                            showToast('Remove failed: ' + (d.error || r.statusText)));
+                    }
+                    loadJourneys(); reloadCurrentPanel();
+                })
+                .catch(e => showToast('Remove failed: ' + e));
+        }
+
+        function updateBuildingBanner() {
+            const banner = document.getElementById('buildingBanner');
+            banner.style.display = journeyBuilding ? 'block' : 'none';
+            document.getElementById('buildingCount').textContent = journeyTrips.length;
+        }
+
+        function reloadCurrentPanel() {
+            if (viewingJourneys) {
+                loadJourneys();
+            } else if (currentProfile) {
+                loadProfileData(currentProfile);
+            }
+        }
+
+        // ---- Journey tab ----
+
+        function selectJourneys() {
+            viewingJourneys = true;
+            currentProfile = null;
+            // Deactivate profile tabs
+            document.querySelectorAll('.profile-tab').forEach(b => b.classList.remove('active'));
+            document.getElementById('journeysTab').classList.add('active');
+            document.getElementById('journeysTab').style.background = '#9C27B0';
+            document.getElementById('journeysTab').style.color = 'white';
+            document.getElementById('tripsPanelTitle').textContent = 'Journeys';
+            document.getElementById('tripsList').style.display = 'none';
+            document.getElementById('journeysList').style.display = 'block';
+            clearMap();
+            loadJourneys();
+        }
+
+        function selectProfile(profileId) {
+            viewingJourneys = false;
+            currentProfile = profileId;
+            document.getElementById('journeysTab').classList.remove('active');
+            document.getElementById('journeysTab').style.background = '';
+            document.getElementById('journeysTab').style.color = '#9C27B0';
+            document.getElementById('tripsPanelTitle').textContent = 'Trips';
+            document.getElementById('tripsList').style.display = 'block';
+            document.getElementById('journeysList').style.display = 'none';
+            updateProfileTabs();
+            loadProfileData(profileId, true);  // fitMap=true on explicit switch
+        }
+
+        function loadJourneys() {
+            fetch('/api/journeys').then(r => r.json()).then(journeys => {
+                allJourneys = journeys;
+                renderJourneysList(journeys);
+            });
+        }
+
+        function renderJourneysList(journeys) {
+            const list = document.getElementById('journeysList');
+            if (!journeys || journeys.length === 0) {
+                list.innerHTML = '<div class="empty-state">No journeys yet.<br>Start one by clicking ▶ Start journey on any trip.</div>';
+                return;
+            }
+            list.innerHTML = journeys.map(j => {
+                const totalKm   = j.total_km?.toFixed(2) || '0';
+                const totalMin  = Math.round((j.total_seconds||0) / 60);
+                const tripTypes = j.trips.map(t =>
+                    ({walking:'🚶',cycling:'🚴',driving:'🚗'}[t.movement_type]||'?')).join(' ');
+                return `
+                <div class="journey-card ${currentJourney===j.id?'active':''}"
+                     onclick="selectJourneyOnMap(${j.id})">
+                    <div style="display:flex;justify-content:space-between;align-items:start;">
+                        <span class="journey-name"
+                              ondblclick="renameJourney(event,${j.id},this)"
+                              title="Double-click to rename">${j.name}</span>
+                        <button class="trip-action-btn"
+                                onclick="deleteJourney(event,${j.id})"
+                                style="border-color:#f44336;color:#f44336;">✕</button>
+                    </div>
+                    <div class="journey-stats">${totalKm} km · ${totalMin} min · ${j.trips.length} trips</div>
+                    <div class="journey-trips-list">${tripTypes} ${j.trips.map(t=>t.distance_km?.toFixed(1)+'km').join(' + ')}</div>
+                </div>`;
+            }).join('');
+        }
+
+        function selectJourneyOnMap(journeyId) {
+            currentJourney = journeyId;
+            const j = allJourneys.find(x => x.id === journeyId);
+            if (!j) return;
+            clearMap();
+            renderJourneysList(allJourneys);  // re-render to show active state
+            // Draw each trip in its own color, connect with dashed lines
+            const colors = ['#9C27B0','#E91E63','#FF5722','#FF9800','#2196F3','#4CAF50'];
+            const allCoords = [];
+            const promises = j.trips.map((trip, i) =>
+                fetch(`/api/trips/${trip.id}`).then(r => r.json()).then(details => {
+                    if (!details.points || details.points.length === 0) return null;
+                    const coords = details.points.map(p => [p.lat, p.lon]);
+                    const color  = colors[i % colors.length];
+                    L.polyline(coords, {color, weight:3, opacity:0.8}).addTo(map);
+                    allCoords.push(...coords);
+                    return coords;
+                })
+            );
+            Promise.all(promises).then(results => {
+                // Connect end of each trip to start of next with dashed line
+                const validResults = results.filter(Boolean);
+                for (let i = 0; i < validResults.length - 1; i++) {
+                    const end   = validResults[i][validResults[i].length - 1];
+                    const start = validResults[i+1][0];
+                    L.polyline([end, start], {
+                        color:'#9C27B0', weight:1, opacity:0.4,
+                        dashArray:'6,6'
+                    }).addTo(map);
+                }
+                if (allCoords.length > 0)
+                    map.fitBounds(allCoords, {padding:[40,40]});
+            });
+        }
+
+        function renameJourney(event, journeyId, el) {
+            event.stopPropagation();
+            el.contentEditable = 'true';
+            el.focus();
+            el.onblur = () => {
+                el.contentEditable = 'false';
+                fetch(`/api/journeys/${journeyId}`, {
+                    method:'PUT',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({name: el.textContent.trim()})
+                }).then(() => loadJourneys());
+            };
+        }
+
+        function deleteJourney(event, journeyId) {
+            event.stopPropagation();
+            if (!confirm('Delete this journey? The trips themselves are not deleted.')) return;
+            fetch(`/api/journeys/${journeyId}`, {method:'DELETE'})
+                .then(r => {
+                    if (!r.ok) {
+                        return r.json().catch(()=>({})).then(d =>
+                            showToast('Delete failed: ' + (d.error || r.statusText)));
+                    }
+                    if (currentJourney === journeyId) { currentJourney = null; clearMap(); }
+                    loadJourneys();
+                })
+                .catch(e => showToast('Delete failed: ' + e));
+        }
+
+        function changeType(event, tripId, newType) {
+            event.stopPropagation();
+            if (!newType) return;
+            fetch(`/api/trips/${tripId}/type`, {
+                method:'PUT',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({type: newType})
+            }).then(r => r.json()).then(data => {
+                if (data.error) { alert('Failed: ' + data.error); return; }
+                const profile = allProfiles.find(p => p.type === newType);
+                if (profile) {
+                    selectProfile(profile.id);  // already passes fitMap=true
+                } else {
+                    reloadCurrentPanel();
+                }
+            });
+        }
+
+        // ---- Split mode ----
+        let splitMode = false;
+        let splitTripId = null;
+        let splitOrigType = null;  // original movement_type before split
+        let splitPoints = [];      // [{lat,lon,ts,spd}, ...]
+        let splitDot = null;       // Leaflet circleMarker for snap dot
+        let splitTooltipEl = null; // DOM tooltip div
+        let splitPolyline = null;  // highlighted polyline for split trip
+        let splitThrottle = 0;
+
+        function enterSplitMode(event, tripId) {
+            event.stopPropagation();
+            if (splitMode) exitSplitMode();
+
+            // Load trip points
+            fetch(`/api/trips/${tripId}`)
+                .then(r => r.json())
+                .then(details => {
+                    if (!details.points || details.points.length < 3) {
+                        alert('Not enough points to split (need at least 3).');
+                        return;
+                    }
+                    splitMode     = true;
+                    splitTripId   = tripId;
+                    splitPoints   = details.points;
+                    splitOrigType = details.movement_type;  // remember for keep-type option
+
+                    // Highlight this trip's polyline in orange
+                    clearMap();
+                    const coords = splitPoints.map(p => [p.lat, p.lon]);
+                    splitPolyline = L.polyline(coords,
+                        {color:'#FF9800', weight:4, opacity:0.9}).addTo(map);
+                    map.fitBounds(coords, {padding:[40,40]});
+
+                    // Show banner
+                    document.getElementById('buildingBanner').style.display = 'block';
+                    document.getElementById('buildingBanner').innerHTML =
+                        '✂️ <strong>Split mode</strong>: hover the route, click to split &nbsp;·&nbsp; ' +
+                        '<a href="#" onclick="exitSplitMode();return false;" style="color:#9C27B0;">Cancel (Esc)</a>';
+
+                    // Create snap dot
+                    splitDot = L.circleMarker([0,0], {
+                        radius:7, color:'#d32f2f', fillColor:'#f44336',
+                        fillOpacity:0.9, weight:2
+                    }).addTo(map);
+
+                    // Create tooltip div
+                    splitTooltipEl = document.createElement('div');
+                    splitTooltipEl.style.cssText =
+                        'position:fixed;background:rgba(0,0,0,0.75);color:white;' +
+                        'padding:4px 8px;border-radius:4px;font-size:11px;' +
+                        'pointer-events:none;display:none;z-index:9999;';
+                    document.body.appendChild(splitTooltipEl);
+
+                    // Map events
+                    map.getContainer().style.cursor = 'crosshair';
+                    map.on('mousemove', onSplitMouseMove);
+                    map.on('click',     onSplitClick);
+                });
+        }
+
+        function onSplitMouseMove(e) {
+            if (!splitMode) return;
+            const now = Date.now();
+            if (now - splitThrottle < 40) return;  // throttle 25fps
+            splitThrottle = now;
+
+            // Find nearest fix to cursor
+            const cur = e.latlng;
+            let bestIdx = 0, bestDist = Infinity;
+            for (let i = 0; i < splitPoints.length; i++) {
+                const p = splitPoints[i];
+                const dlat = p.lat - cur.lat;
+                const dlon = p.lon - cur.lng;
+                const d = dlat*dlat + dlon*dlon;
+                if (d < bestDist) { bestDist = d; bestIdx = i; }
+            }
+
+            // Don't snap to first or last point (can't split there)
+            if (bestIdx === 0) bestIdx = 1;
+            if (bestIdx >= splitPoints.length - 1) bestIdx = splitPoints.length - 2;
+
+            const p = splitPoints[bestIdx];
+            splitDot.setLatLng([p.lat, p.lon]);
+
+            // Format tooltip
+            let timeStr = '';
+            if (p.timestamp) {
+                try { timeStr = new Date(p.timestamp).toLocaleTimeString(); } catch(e) {}
+            }
+            const spd   = p.speed_kmh != null ? p.speed_kmh.toFixed(1) + ' km/h' : '—';
+            const label = `fix ${bestIdx+1}/${splitPoints.length} · ${timeStr} · ${spd}`;
+            splitTooltipEl.textContent = label;
+            splitTooltipEl.style.display = 'block';
+
+            // Position tooltip near cursor
+            const mp = e.originalEvent;
+            splitTooltipEl.style.left = (mp.clientX + 14) + 'px';
+            splitTooltipEl.style.top  = (mp.clientY - 28) + 'px';
+
+            // Store for click handler
+            map._splitBestIdx = bestIdx;
+        }
+
+        function onSplitClick(e) {
+            if (!splitMode) return;
+            const idx = map._splitBestIdx;
+            if (idx == null) return;
+            const p = splitPoints[idx];
+            let timeStr = '';
+            try { timeStr = new Date(p.timestamp).toLocaleTimeString(); } catch(e) {}
+            if (!confirm(`Split trip at fix ${idx+1}/${splitPoints.length} (${timeStr})?`)) return;
+
+            // Ask whether to keep original type or auto-classify each part
+            const typeIcons = {walking:'🚶', cycling:'🚴', driving:'🚗'};
+            const icon = typeIcons[splitOrigType] || '?';
+            const keepType = confirm(
+                `Keep both parts as ${icon} ${splitOrigType}?\n\n` +
+                `OK = keep as ${splitOrigType}\n` +
+                `Cancel = auto-classify each part by speed`
+            );
+
+            fetch(`/api/trips/${splitTripId}/split`, {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({point_index: idx})
+            }).then(r => r.json()).then(data => {
+                if (data.error) { alert('Split failed: ' + data.error); return; }
+                const origType = splitOrigType;
+                exitSplitMode();
+                if (keepType) {
+                    // Override both new trips to original type
+                    const updates = [data.trip_a, data.trip_b].map(tid =>
+                        fetch(`/api/trips/${tid}/type`, {
+                            method: 'PUT',
+                            headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify({type: origType})
+                        })
+                    );
+                    Promise.all(updates).then(() => reloadCurrentPanel());
+                } else {
+                    reloadCurrentPanel();
+                }
+            });
+        }
+
+        function exitSplitMode() {
+            splitMode     = false;
+            splitTripId   = null;
+            splitOrigType = null;
+            splitPoints   = [];
+            map._splitBestIdx = null;
+            map.off('mousemove', onSplitMouseMove);
+            map.off('click',     onSplitClick);
+            map.getContainer().style.cursor = '';
+            if (splitDot)     { map.removeLayer(splitDot);     splitDot = null; }
+            if (splitPolyline){ map.removeLayer(splitPolyline); splitPolyline = null; }
+            if (splitTooltipEl){ splitTooltipEl.remove(); splitTooltipEl = null; }
+            document.getElementById('buildingBanner').style.display = 'none';
+            reloadCurrentPanel();
+        }
+
+        // Escape key cancels split mode
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && splitMode) exitSplitMode();
+        });
+        
+        function deleteTrip(event, tripId) {
+            event.stopPropagation();  // don't trigger selectTrip
+            if (!confirm('Delete this trip from the database? This cannot be undone.')) return;
+            fetch(`/api/trips/${tripId}`, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) { alert('Delete failed: ' + data.error); return; }
+                    clearMap();
+                    // Reload whichever profile is currently active
+                    if (currentProfile) {
+                        loadProfileData(currentProfile);
+                    } else {
+                        loadAllData();
+                    }
+                })
+                .catch(e => alert('Delete failed: ' + e));
+        }
+        
+        function selectTrip(tripId) {
+            currentTrip = tripId;
+            focusTrip(tripId);  // pop the polyline + zoom to it
+        }
+
+        function clearMap() {
+            // Explicitly unbind tooltips before removing layers — Leaflet
+            // usually cleans them up but a stale sticky tooltip on a
+            // removed polyline has been observed to leave a residual
+            // black rectangle on the map. Belt-and-suspenders.
+            polylines.forEach(p => {
+                try { p.closeTooltip(); p.unbindTooltip(); } catch (_) {}
+                map.removeLayer(p);
+            });
+            markers.forEach(m => map.removeLayer(m));
+            polylines      = [];
+            markers        = [];
+            tripPolylines  = {};
+            activeTripId   = null;
+            trippedFitOnce.clear();
+        }
+        
+        // ----- Header pickers: device + time-range -----
+        // Custom popover-style dropdown: each row has a swatch that opens
+        // a small palette (12 presets + native picker + OK), and a
+        // hover-revealed delete button (tombstones the device locally;
+        // no DB changes).
+        const PRESET_COLORS = [
+            '#ef4444','#f97316','#f59e0b','#eab308','#84cc16','#22c55e',
+            '#14b8a6','#06b6d4','#3b82f6','#6366f1','#a855f7','#ec4899',
+        ];
+
+        function togglePalette(swatchEl) {
+            const palette = swatchEl.parentElement.querySelector('.palette');
+            const wasOpen = !palette.hidden;
+            // Close all other palettes
+            document.querySelectorAll('.palette').forEach(p => p.hidden = true);
+            palette.hidden = wasOpen;
+        }
+
+        function pickPaletteColor(el, deviceId, color) {
+            setDeviceColor(deviceId, color);
+            // Outline the chosen swatch so the user has a clear "this one"
+            // confirmation without having to close the popup.
+            el.parentElement.querySelectorAll('.palette-color')
+              .forEach(c => c.classList.toggle('current',
+                  c.dataset.color.toLowerCase() === color.toLowerCase()));
+        }
+
+        function closePaletteOf(btn) {
+            const p = btn.closest('.palette');
+            if (p) p.hidden = true;
+        }
+
+        async function loadDevices() {
+            try {
+                const r = await fetch('/api/devices');
+                const d = await r.json();
+                const menu = document.getElementById('devicePickerMenu');
+                let html =
+                  `<div class="device-row ${currentDevice==='' ? 'active' : ''}"
+                        data-device="">
+                       <div class="name">All devices</div>
+                   </div>`;
+                // Merge real devices (with trips) and user-added placeholders.
+                const realIds = (d.devices || []).map(x => x.device_id || '');
+                const merged  = [...realIds];
+                for (const a of addedDevices) {
+                    if (!merged.includes(a)) merged.push(a);
+                }
+                for (const id of merged) {
+                    if (deletedDevices.includes(id)) continue;
+                    const color  = colorForDevice(id);
+                    const safeId = escHtml(id);
+                    html +=
+                      `<div class="device-row ${currentDevice===id ? 'active' : ''}"
+                            data-device="${safeId}">
+                           <div class="swatch-wrap">
+                               <div class="swatch" style="background:${color}"
+                                    title="Click to change colour"
+                                    onclick="event.stopPropagation(); togglePalette(this)"></div>
+                               <div class="palette" hidden>
+                                   <button type="button" class="palette-ok"
+                                           onclick="event.stopPropagation(); closePaletteOf(this)">Set color</button>
+                                   <div class="palette-grid">
+                                       ${PRESET_COLORS.map(c => `
+                                       <div class="palette-color ${c.toLowerCase()===color.toLowerCase() ? 'current' : ''}"
+                                            style="background:${c}"
+                                            data-color="${c}"
+                                            onclick="event.stopPropagation(); pickPaletteColor(this, '${safeId}', '${c}')"></div>`).join('')}
+                                   </div>
+                                   <input type="color" class="palette-custom" value="${color}"
+                                          onclick="event.stopPropagation()"
+                                          oninput="setDeviceColor('${safeId}', this.value)"
+                                          onchange="setDeviceColor('${safeId}', this.value)"
+                                          title="Custom shade">
+                               </div>
+                           </div>
+                           <button type="button" class="edit-btn"
+                                   onclick="event.stopPropagation(); renameDevice('${safeId}')"
+                                   title="Rename device (propagates to firmware)">✎</button>
+                           <div class="name">${escHtml(id || '(unassigned)')}</div>
+                           <button type="button" class="delete-btn"
+                                   onclick="event.stopPropagation(); deleteDevice('${safeId}')"
+                                   title="Hide from list (data unchanged)">×</button>
+                       </div>`;
+                }
+                if (deletedDevices.length > 0) {
+                    html +=
+                      `<div class="device-row-divider"></div>
+                       <div class="device-row-restore"
+                            onclick="event.stopPropagation(); restoreDevices()">
+                           ↺ Show hidden (${deletedDevices.length})
+                       </div>`;
+                }
+                // "+ Add device" pre-registers an id without needing the
+                // device to be on-air yet. Useful for setting a colour
+                // before a trip lands.
+                html +=
+                  `<div class="device-row-add"
+                        onclick="event.stopPropagation(); addNewDevice()">
+                       + Add device
+                   </div>`;
+                menu.innerHTML = html;
+                menu.querySelectorAll('.device-row').forEach(row => {
+                    row.addEventListener('click', () =>
+                        pickDevice(row.dataset.device));
+                });
+                updateDevicePickerLabel();
+                refreshLiveMarkers();
+            } catch (e) {
+                console.error('loadDevices failed:', e);
+            }
+        }
+
+        function restoreDevices() {
+            deletedDevices = [];
+            localStorage.removeItem('tripHubDeletedDevices');
+            loadDevices();
+            refreshLiveMarkers();
+        }
+
+        async function addNewDevice() {
+            const id = prompt(
+                'New device name:\n\n' +
+                '1-15 chars; letters, digits, _ or -.\n\n' +
+                'After OK, power-cycle the device within 30 seconds.\n' +
+                'It will announce itself and be renamed automatically.', '');
+            if (id === null) return;
+            const trimmed = id.trim();
+            if (!trimmed) return;
+            if (!/^[A-Za-z0-9_-]{1,15}$/.test(trimmed)) {
+                alert('Invalid name. Use 1-15 chars: A-Z 0-9 _ -');
+                return;
+            }
+            return _runPairingAttempt(trimmed);
+        }
+
+        async function _runPairingAttempt(trimmed) {
+            // Build a lightweight modal overlay with a 50 s countdown
+            // (30 s listen window + ~15 s rename round-trip on the server
+            // side, plus a small slack). It's purely status — no Cancel,
+            // because the server-side op will time out on its own.
+            const overlay = document.createElement('div');
+            overlay.style.cssText =
+                'position:fixed;inset:0;background:rgba(0,0,0,0.55);' +
+                'z-index:10000;display:flex;align-items:center;' +
+                'justify-content:center;font-family:inherit;';
+            const box = document.createElement('div');
+            box.style.cssText =
+                'background:#fff;padding:24px 28px;border-radius:10px;' +
+                'box-shadow:0 8px 32px rgba(0,0,0,0.3);max-width:380px;' +
+                'text-align:center;';
+            const title = document.createElement('div');
+            title.textContent = 'Pairing "' + trimmed + '"';
+            title.style.cssText = 'font-weight:600;font-size:16px;margin-bottom:10px;';
+            const msg = document.createElement('div');
+            msg.style.cssText = 'font-size:14px;color:#555;line-height:1.5;';
+            msg.textContent =
+                'Power-cycle the target device within 30 s. The hub will ' +
+                'capture its announce and assign the new name.';
+            const counter = document.createElement('div');
+            counter.style.cssText =
+                'margin-top:14px;font-size:28px;font-weight:600;color:#1a73e8;';
+            box.appendChild(title);
+            box.appendChild(msg);
+            box.appendChild(counter);
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+
+            // Two-phase progress so the visible counter matches what the
+            // server is actually doing:
+            //   Phase 1 — listen window (30 s): user must power-cycle the
+            //     device. Numeric countdown.
+            //   Phase 2 — rename round-trip (~up to 25 s after capture):
+            //     device persists + reboots + announces. Spinner-style "…".
+            // The fetch promise resolves whenever the server reaches a
+            // terminal state (success/failed/timeout) so the modal closes
+            // immediately on result regardless of which phase we're in.
+            let secondsLeft = 30;
+            counter.textContent = secondsLeft + 's';
+            const tick = setInterval(() => {
+                secondsLeft -= 1;
+                if (secondsLeft <= 0) {
+                    counter.textContent = '…';
+                    msg.textContent =
+                        'Listen window closed. Awaiting rename ' +
+                        'acknowledgement from device.';
+                    clearInterval(tick);
+                } else {
+                    counter.textContent = secondsLeft + 's';
+                }
+            }, 1000);
+
+            let result;
+            try {
+                const resp = await fetch('/api/device/listen', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({new: trimmed})
+                });
+                result = await resp.json();
+            } catch (e) {
+                result = {status: 'failed', error: String(e)};
+            } finally {
+                clearInterval(tick);
+                document.body.removeChild(overlay);
+            }
+            // Yield one frame so the overlay actually disappears before
+            // alert() blocks the event loop — otherwise the browser
+            // shows the modal stacked behind the alert.
+            await new Promise(r => requestAnimationFrame(r));
+
+            if (result.status === 'success') {
+                // Device has been renamed in the DB; subsequent traffic will
+                // arrive under the new name, populating /api/devices on its
+                // own. Drop any stale tombstone so it shows up.
+                const dIdx = deletedDevices.indexOf(trimmed);
+                if (dIdx >= 0) {
+                    deletedDevices.splice(dIdx, 1);
+                    localStorage.setItem('tripHubDeletedDevices',
+                                          JSON.stringify(deletedDevices));
+                }
+                // Pre-seed the dropdown so the device is selectable before
+                // its first trip lands.
+                if (!addedDevices.includes(trimmed)) {
+                    addedDevices.push(trimmed);
+                    localStorage.setItem('tripHubAddedDevices',
+                                          JSON.stringify(addedDevices));
+                }
+                await loadDevices();
+                alert('Pairing complete.\n\n"' +
+                      (result.old || '?') + '" provisioned as "' +
+                      trimmed + '".');
+            } else if (result.status === 'timeout') {
+                const retry = await _confirmRetry(
+                    'Pairing timed out — no device announce received ' +
+                    'within 30 s.\n\nConfirm the target device booted ' +
+                    'inside the listen window and is within LoRa range, ' +
+                    'then try again.');
+                if (retry) {
+                    // Re-run the pairing flow with the same typed name.
+                    return _runPairingAttempt(trimmed);
+                }
+            } else {
+                alert('Pairing failed.\n\nReason: ' +
+                      (result.error || result.status));
+            }
+        }
+
+        // Custom modal — confirm() / alert() can't carry custom button
+        // labels, and we want a clear "Try again" CTA on pairing timeout.
+        function _confirmRetry(message) {
+            return new Promise(resolve => {
+                const overlay = document.createElement('div');
+                overlay.style.cssText =
+                    'position:fixed;inset:0;background:rgba(0,0,0,0.55);' +
+                    'z-index:10000;display:flex;align-items:center;' +
+                    'justify-content:center;font-family:inherit;';
+                const box = document.createElement('div');
+                box.style.cssText =
+                    'background:#fff;padding:22px 26px;border-radius:10px;' +
+                    'box-shadow:0 8px 32px rgba(0,0,0,0.3);max-width:380px;';
+                const msg = document.createElement('div');
+                msg.style.cssText =
+                    'font-size:14px;color:#333;line-height:1.5;margin-bottom:18px;';
+                msg.textContent = message;
+                const row = document.createElement('div');
+                row.style.cssText =
+                    'display:flex;gap:10px;justify-content:flex-end;';
+                const cancel = document.createElement('button');
+                cancel.textContent = 'Cancel';
+                cancel.style.cssText =
+                    'padding:8px 16px;border:1px solid #d4d4d8;' +
+                    'background:#fff;color:#333;border-radius:6px;' +
+                    'cursor:pointer;font-family:inherit;font-size:14px;';
+                const retry = document.createElement('button');
+                retry.textContent = 'Try again';
+                retry.style.cssText =
+                    'padding:8px 16px;border:0;background:#1976d2;' +
+                    'color:#fff;border-radius:6px;cursor:pointer;' +
+                    'font-family:inherit;font-size:14px;font-weight:600;';
+                const close = (val) => {
+                    document.body.removeChild(overlay);
+                    resolve(val);
+                };
+                cancel.onclick = () => close(false);
+                retry.onclick  = () => close(true);
+                row.appendChild(cancel);
+                row.appendChild(retry);
+                box.appendChild(msg);
+                box.appendChild(row);
+                overlay.appendChild(box);
+                document.body.appendChild(overlay);
+                retry.focus();
+            });
+        }
+
+        function updateDevicePickerLabel() {
+            const el       = document.getElementById('devicePickerLabel');
+            const swatches = document.getElementById('devicePickerSwatches');
+            if (!currentDevice) {
+                // 'All' view: mini-swatch per device on the LEFT of the
+                // button, 'All' label on the right (next to the arrow).
+                // The strip is rebuilt from the dropdown DOM so colours
+                // stay in lock-step with the rows + map markers.
+                const rows = document.querySelectorAll(
+                    '#devicePickerMenu .device-row[data-device]');
+                let html = '';
+                rows.forEach(row => {
+                    const id = row.dataset.device;
+                    if (!id) return;                // skip the 'All devices' row itself
+                    html +=
+                        '<span class="mini-swatch" style="background:'
+                        + colorForDevice(id) + '"></span>';
+                });
+                swatches.innerHTML = html;
+                el.textContent = 'All';
+                return;
+            }
+            // Specific device — no mini-swatch strip needed, the inline
+            // pin in the label carries the colour.
+            swatches.innerHTML = '';
+            const color = colorForDevice(currentDevice);
+            el.innerHTML =
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32"' +
+                ' width="14" height="18" aria-hidden="true">' +
+                '<path d="M12 0C5.4 0 0 5.4 0 12c0 8 12 20 12 20s12-12 12-20' +
+                'C24 5.4 18.6 0 12 0z"' +
+                ' fill="' + color + '"' +
+                ' stroke="rgba(0,0,0,0.25)" stroke-width="0.5"/>' +
+                '<circle cx="12" cy="12" r="4" fill="white"/>' +
+                '</svg>' +
+                '<span>' + escHtml(currentDevice) + '</span>';
+        }
+
+        function pickDevice(id) {
+            currentDevice = id;
+            localStorage.setItem('tripHubDevice', id);
+            updateDevicePickerLabel();
+            // Re-stamp .active on the open menu's rows. loadDevices()
+            // bakes the active row into HTML once; without this, the
+            // menu shows whichever device was selected when the menu
+            // was last rebuilt — i.e. the previous selection.
+            document.querySelectorAll('#devicePickerMenu .device-row')
+                .forEach(row => row.classList.toggle('active',
+                                row.dataset.device === id));
+            document.getElementById('devicePickerMenu').hidden = true;
+            loadAllData();
+            refreshLiveMarkers();
+            // If the Activity tab is currently open, re-tail the log
+            // through the new device filter immediately rather than
+            // waiting for the 5 s poll.
+            if (activityPoll) activityFetch();
+            // Ask the device for a fresh position (out-of-cadence). The
+            // reply comes back through the normal GPS broadcast pipeline
+            // — debounced server-side at 10 s per device. "All devices"
+            // (id === '') skips the ping.
+            if (id) {
+                pingDevice(id);
+                syncDevice(id);   // also pull any unsent trips
+            }
+        }
+
+        function pingDevice(id) {
+            fetch('/api/device/ping', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => {
+                if (!d) return;
+                if (d.status === 'debounced') {
+                    showToast('Ping debounced — wait ' + d.retry_in + 's');
+                    return;
+                }
+                if (d.status !== 'queued') return;
+                // Give the device a few seconds to receive QPOS, reply
+                // with GPS, and the Pi to ingest it. Then refresh the
+                // marker so the user sees the new position without
+                // having to wait for the next periodic poll.
+                setTimeout(refreshLiveMarkers, 4000);
+            })
+            .catch(() => { /* offline / no hub — silent */ });
+        }
+
+        function syncDevice(id) {
+            // Ask the hub to push QTRIPS at this device now, skipping
+            // PicoB's 5 min SYNC_RETRY_MS. Trips land in the DB as
+            // their RTRIP / RPTS cycle finishes; refresh listings a
+            // few times to pick them up as they arrive.
+            fetch('/api/device/sync', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => {
+                if (!d) return;
+                if (d.status === 'debounced') {
+                    showToast('Sync debounced — wait ' + d.retry_in + 's');
+                    return;
+                }
+                if (d.status !== 'queued') return;
+                // The first trip usually lands in 2-4 s; the rest
+                // trickle in over the next 30-60 s depending on the
+                // backlog. Poll a few times rather than once.
+                [4000, 12000, 25000].forEach(ms =>
+                    setTimeout(loadAllData, ms));
+            })
+            .catch(() => { /* offline / no hub — silent */ });
+        }
+
+        function onDeviceChange() {
+            // kept for backwards compat with anything still calling it
+            pickDevice(currentDevice);
+        }
+
+        function toggleDevicePicker(e) {
+            if (e) e.stopPropagation();
+            const m = document.getElementById('devicePickerMenu');
+            m.hidden = !m.hidden;
+        }
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.device-picker')) {
+                const m = document.getElementById('devicePickerMenu');
+                if (m) m.hidden = true;
+            }
+            // Close any open colour palettes when click is outside swatch / palette.
+            if (!e.target.closest('.swatch') && !e.target.closest('.palette')) {
+                document.querySelectorAll('.palette').forEach(p => p.hidden = true);
+            }
+        });
+        // Universal close: Esc dismisses any open palette / device popover.
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.palette').forEach(p => p.hidden = true);
+                const m = document.getElementById('devicePickerMenu');
+                if (m) m.hidden = true;
+            }
+        });
+
+        function setDeviceColor(deviceId, hex) {
+            deviceColors[deviceId] = hex;
+            localStorage.setItem('tripHubDeviceColors',
+                                 JSON.stringify(deviceColors));
+            const swatch = document.querySelector(
+                `.device-row[data-device="${deviceId}"] .swatch`);
+            if (swatch) swatch.style.background = hex;
+            refreshLiveMarkers();
+            loadPresence();              // re-paint chat-header dots
+            updateDevicePickerLabel();   // re-paint mini-swatches on the 'All' button
+        }
+
+        async function renameDevice(deviceId) {
+            if (!deviceId) return;
+            const newId = prompt(
+                `Rename "${deviceId}" to:\n\n` +
+                `1-15 chars; letters, digits, _ or -.\n` +
+                `The device must be on-air to confirm — Pi 5 waits 18 s.`,
+                deviceId);
+            if (newId === null) return;       // cancel
+            const trimmed = newId.trim();
+            if (!trimmed || trimmed === deviceId) return;
+            if (!/^[A-Za-z0-9_-]{1,15}$/.test(trimmed)) {
+                alert('Invalid name. Use 1-15 chars: A-Z 0-9 _ -');
+                return;
+            }
+            // Visual progress on the row
+            const row = document.querySelector(
+                `.device-row[data-device="${deviceId}"]`);
+            const restore = row ? row.innerHTML : null;
+            if (row) row.innerHTML =
+                `<div class="name">Renaming ${escHtml(deviceId)} → ` +
+                `${escHtml(trimmed)}…</div>`;
+            try {
+                const r = await fetch('/api/device/rename', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({old: deviceId, new: trimmed})
+                });
+                const data = await r.json();
+                if (r.ok && data.status === 'success') {
+                    // Carry over user prefs (selection / colour) to new id
+                    if (currentDevice === deviceId) {
+                        currentDevice = trimmed;
+                        localStorage.setItem('tripHubDevice', trimmed);
+                    }
+                    if (deviceColors[deviceId]) {
+                        deviceColors[trimmed] = deviceColors[deviceId];
+                        delete deviceColors[deviceId];
+                        localStorage.setItem('tripHubDeviceColors',
+                                              JSON.stringify(deviceColors));
+                    }
+                    // Drop the old id from addedDevices (otherwise it lingers
+                    // as a ghost row alongside the new id, since the new id
+                    // arrives via /api/devices on its own).
+                    const aIdx = addedDevices.indexOf(deviceId);
+                    if (aIdx >= 0) {
+                        addedDevices.splice(aIdx, 1);
+                        localStorage.setItem('tripHubAddedDevices',
+                                              JSON.stringify(addedDevices));
+                    }
+                    await loadDevices();
+                    loadAllData();
+                    alert(`Renamed ${deviceId} → ${trimmed}`);
+                } else {
+                    if (row && restore) row.innerHTML = restore;
+                    alert('Rename failed: ' +
+                          (data.error || data.status || 'unknown'));
+                }
+            } catch (e) {
+                if (row && restore) row.innerHTML = restore;
+                alert('Rename failed: ' + e);
+            }
+        }
+
+        async function deleteDevice(deviceId) {
+            if (!deviceId) return;
+            // Try a hard DELETE first. The server will only succeed if the
+            // device has zero trips/messages/live_points — i.e. nothing
+            // would be lost. If it has data, server returns 409 and we
+            // fall back to the soft-hide tombstone.
+            let deleted = false;
+            try {
+                const r = await fetch(
+                    '/api/device/' + encodeURIComponent(deviceId),
+                    {method: 'DELETE'});
+                if (r.ok) {
+                    deleted = true;
+                } else if (r.status !== 409) {
+                    const data = await r.json().catch(() => ({}));
+                    alert('Delete failed: ' + (data.error || r.statusText));
+                    return;
+                }
+            } catch (e) {
+                alert('Delete failed: ' + e);
+                return;
+            }
+
+            if (!deleted) {
+                // Has data — confirm hide.
+                if (!confirm(`"${deviceId}" has trips or chat history.\n` +
+                             `Hide it from the list?\n\n` +
+                             `(Use 'Show hidden' to restore.)`)) return;
+                if (!deletedDevices.includes(deviceId)) {
+                    deletedDevices.push(deviceId);
+                    localStorage.setItem('tripHubDeletedDevices',
+                                         JSON.stringify(deletedDevices));
+                }
+            }
+
+            // Either way, drop any stale localStorage entries for this id.
+            const aIdx = addedDevices.indexOf(deviceId);
+            if (aIdx >= 0) {
+                addedDevices.splice(aIdx, 1);
+                localStorage.setItem('tripHubAddedDevices',
+                                     JSON.stringify(addedDevices));
+            }
+            if (deviceColors[deviceId]) {
+                delete deviceColors[deviceId];
+                localStorage.setItem('tripHubDeviceColors',
+                                     JSON.stringify(deviceColors));
+            }
+            if (currentDevice === deviceId) {
+                currentDevice = '';
+                localStorage.setItem('tripHubDevice', '');
+                updateDevicePickerLabel();
+                loadAllData();
+            }
+            loadDevices();
+        }
+
+        function onRangeChange() {
+            const f = document.getElementById('customFrom').value;
+            const t = document.getElementById('customTo').value;
+            if (f) { customFrom = f; localStorage.setItem('tripHubFrom', f); }
+            if (t) { customTo   = t; localStorage.setItem('tripHubTo',   t); }
+            // Manual edit clears any quick-preset highlight; the date pair
+            // no longer matches a known preset.
+            setActiveQuickKey(matchQuickKey(customFrom, customTo));
+            if (customFrom && customTo) loadAllData();
+        }
+
+        // Preset → (start, end) ISO date pair. All ranges end on today.
+        function presetRange(key) {
+            const today = new Date();
+            const iso   = d => d.toISOString().slice(0, 10);
+            const back  = n => new Date(today.getTime() - n * 86400000);
+            switch (key) {
+                case 'today':     return [iso(today),   iso(today)];
+                case 'yesterday': return [iso(back(1)), iso(back(1))];
+                case 'week':      return [iso(back(6)), iso(today)];
+                case 'month':     return [iso(back(29)),iso(today)];
+                case 'year':      return [iso(back(364)),iso(today)];
+            }
+            return [null, null];
+        }
+
+        // If the current (from, to) pair matches a known preset, return its
+        // key so we can highlight the corresponding quick button.
+        function matchQuickKey(from, to) {
+            for (const k of ['today','yesterday','week','month','year']) {
+                const [pf, pt] = presetRange(k);
+                if (pf === from && pt === to) return k;
+            }
+            return null;
+        }
+
+        function setActiveQuickKey(key) {
+            document.querySelectorAll('.quick-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.key === key);
+            });
+        }
+
+        function setQuickRange(key) {
+            const [f, t] = presetRange(key);
+            if (!f || !t) return;
+            customFrom = f; customTo = t;
+            document.getElementById('customFrom').value = f;
+            document.getElementById('customTo').value   = t;
+            localStorage.setItem('tripHubFrom', f);
+            localStorage.setItem('tripHubTo',   t);
+            setActiveQuickKey(key);
+            loadAllData();
+        }
+
+        function initRangePicker() {
+            document.getElementById('customFrom').value = customFrom;
+            document.getElementById('customTo').value   = customTo;
+            setActiveQuickKey(matchQuickKey(customFrom, customTo));
+        }
+
+        // ---- Chat (polls /api/messages, sends via POST) ----
+        let chatLastId = 0;             // highest id rendered (newest)
+        const CHAT_MAX_LEN = 200;       // bytes (utf-8); enforce <= chars
+
+        function escapeHtml(s) {
+            return String(s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function fmtTime(iso) {
+            // iso like 2026-05-01T13:42:11.123456 -> "13:42:11"
+            const m = /T(\d\d:\d\d:\d\d)/.exec(iso || '');
+            return m ? m[1] : (iso || '');
+        }
+
+        // ---- Message context menu (long-press touch / right-click desktop) ----
+        let msgMenuEl = null;       // the floating menu, when open
+        let longPressTimer = null;  // pending long-press timer
+        let longPressMoved = false;
+        const LONG_PRESS_MS = 500;
+
+        function showToast(text) {
+            let t = document.getElementById('msgToast');
+            if (!t) {
+                t = document.createElement('div');
+                t.id = 'msgToast';
+                t.className = 'msg-toast';
+                document.body.appendChild(t);
+            }
+            t.textContent = text;
+            t.classList.add('show');
+            clearTimeout(t._hideTimer);
+            t._hideTimer = setTimeout(() => t.classList.remove('show'), 1500);
+        }
+
+        function closeMsgMenu() {
+            if (msgMenuEl) {
+                msgMenuEl.remove();
+                msgMenuEl = null;
+            }
+            document.querySelectorAll('.msg.selected').forEach(
+                n => n.classList.remove('selected'));
+        }
+
+        function openMsgMenu(msgDiv, clientX, clientY) {
+            closeMsgMenu();
+            msgDiv.classList.add('selected');
+            const id   = parseInt(msgDiv.dataset.id, 10);
+            const text = msgDiv.dataset.text || '';
+
+            const menu = document.createElement('div');
+            menu.className = 'msg-menu';
+
+            const bCopy = document.createElement('button');
+            bCopy.textContent = '📋 Copy';
+            bCopy.addEventListener('click', () => {
+                copyText(text);
+                closeMsgMenu();
+            });
+            menu.appendChild(bCopy);
+
+            const bReply = document.createElement('button');
+            bReply.textContent = '💬 Reply';
+            bReply.addEventListener('click', () => {
+                replyTo(text);
+                closeMsgMenu();
+            });
+            menu.appendChild(bReply);
+
+            const bDelete = document.createElement('button');
+            bDelete.textContent = '🗑 Delete';
+            bDelete.className = 'danger';
+            bDelete.addEventListener('click', () => {
+                deleteMessage(id, msgDiv);
+                closeMsgMenu();
+            });
+            menu.appendChild(bDelete);
+
+            // Position - keep within viewport
+            menu.style.visibility = 'hidden';
+            document.body.appendChild(menu);
+            const w = menu.offsetWidth, h = menu.offsetHeight;
+            let x = clientX, y = clientY;
+            if (x + w > window.innerWidth - 8)   x = window.innerWidth  - w - 8;
+            if (y + h > window.innerHeight - 8)  y = window.innerHeight - h - 8;
+            if (x < 8) x = 8;
+            if (y < 8) y = 8;
+            menu.style.left = x + 'px';
+            menu.style.top  = y + 'px';
+            menu.style.visibility = 'visible';
+            msgMenuEl = menu;
+        }
+
+        // Click outside the menu -> close
+        document.addEventListener('click', e => {
+            if (msgMenuEl && !msgMenuEl.contains(e.target)) closeMsgMenu();
+        });
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeMsgMenu();
+        });
+
+        function attachLongPress(div) {
+            div.addEventListener('touchstart', e => {
+                longPressMoved = false;
+                clearTimeout(longPressTimer);
+                const t = e.touches[0];
+                const cx = t.clientX, cy = t.clientY;
+                longPressTimer = setTimeout(() => {
+                    if (!longPressMoved) {
+                        // Try to suppress the upcoming click+contextmenu
+                        e.preventDefault();
+                        openMsgMenu(div, cx, cy);
+                    }
+                }, LONG_PRESS_MS);
+            }, { passive: false });
+            div.addEventListener('touchmove', () => {
+                longPressMoved = true;
+                clearTimeout(longPressTimer);
+            });
+            div.addEventListener('touchend',    () => clearTimeout(longPressTimer));
+            div.addEventListener('touchcancel', () => clearTimeout(longPressTimer));
+        }
+
+        // ---- Menu actions ----
+        function copyText(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text)
+                    .then(() => showToast('Copied'))
+                    .catch(() => showToast('Copy failed'));
+            } else {
+                // Fallback for old browsers
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); showToast('Copied'); }
+                catch (e) { showToast('Copy failed'); }
+                document.body.removeChild(ta);
+            }
+        }
+
+        function replyTo(text) {
+            const inp = document.getElementById('chatInput');
+            if (!inp) return;
+            const snippet = text.length > 30 ? text.slice(0, 30) + '…' : text;
+            const quote = '> ' + snippet + '\n';
+            inp.value = quote + inp.value;
+            // Most browsers don't display \n in <input type=text>; but the
+            // '>' marker still goes out over the wire when the user sends.
+            inp.focus();
+            inp.setSelectionRange(inp.value.length, inp.value.length);
+            updateChatCounter();
+        }
+
+        function deleteMessage(id, node) {
+            // Optimistic UI: remove the node immediately, fire request.
+            // If the request fails we re-fetch to restore.
+            if (node && node.parentNode) node.parentNode.removeChild(node);
+            fetch('/api/messages/' + id, { method: 'DELETE' })
+                .then(r => {
+                    if (r.ok) showToast('Deleted');
+                    else { showToast('Delete failed'); pollChat(); }
+                })
+                .catch(() => { showToast('Delete failed'); pollChat(); });
+        }
+
+        function renderMessage(m) {
+            // Build one message DOM node and prepend it to the chat
+            // (column-reverse means prepend = newest at top visually).
+            const div = document.createElement('div');
+            const cls = ['msg', m.direction];
+            if (m.direction === 'tx' && m.status === 'pending') cls.push('pending');
+            if (m.direction === 'tx' && m.status === 'failed')  cls.push('failed');
+            div.className = cls.join(' ');
+            div.dataset.id = m.id;
+            // Stash raw text so the context menu can read it without re-fetching
+            div.dataset.text = m.text;
+
+            const arrow = m.direction === 'rx' ? '←' : '→';
+            const time  = fmtTime(m.recv_at);
+
+            let meta = time;
+            if (m.direction === 'rx' && m.rssi != null) {
+                meta += ' · ' + m.rssi + ' dBm';
+                if (m.snr != null) meta += ' SNR ' + m.snr.toFixed(1);
+            }
+            if (m.direction === 'tx') {
+                if (m.status === 'pending') meta += ' · sending…';
+                else if (m.status === 'failed') meta += ' · FAILED';
+                else if (m.status === 'sent')   meta += ' · sent';
+            }
+
+            div.innerHTML =
+                '<div>' + arrow + ' ' + escapeHtml(m.text) + '</div>' +
+                '<div class="meta">' + escapeHtml(meta) + '</div>';
+
+            // Right-click (desktop) -> open menu
+            div.addEventListener('contextmenu', e => {
+                e.preventDefault();
+                openMsgMenu(div, e.clientX, e.clientY);
+            });
+            // Long-press (touch) -> open menu
+            attachLongPress(div);
+
+            return div;
+        }
+
+        function pollChat() {
+            const url = '/api/messages?since_id=' + chatLastId + '&limit=200';
+            fetch(url).then(r => r.json()).then(data => {
+                if (!data || !Array.isArray(data.messages)) return;
+                // Server returns newest first; prepend in chronological order
+                // so newest ends up on top (because of column-reverse).
+                const list = document.getElementById('chatMessages');
+                // Iterate ascending id to prepend each newest one last
+                const msgs = data.messages.slice().sort((a, b) => a.id - b.id);
+                const hadNew = msgs.length > 0;
+                for (const m of msgs) {
+                    list.prepend(renderMessage(m));
+                    if (m.id > chatLastId) chatLastId = m.id;
+                }
+                // Trim DOM to 500 messages so it doesn't grow forever
+                while (list.children.length > 500) {
+                    list.removeChild(list.lastChild);
+                }
+                refreshPendingStatuses();
+                // Any new message means at least one device is currently
+                // alive — re-read presence so the dots reflect that.
+                if (hadNew) loadPresence();
+            }).catch(() => { /* network blip, retry next tick */ });
+        }
+
+        // ----- LoRa presence (dots next to "Chat" title) -----
+        // Every node heartbeats DEVICE: every 60s. A device is ONLINE if
+        // heard within ONLINE_MIN; older = offline (greyed, not GPS-stale —
+        // this tracks liveness, not fix freshness, so it intentionally
+        // differs from the map markers' age tiers).
+        const ONLINE_MIN = 10;
+        function presenceOpacity(ageMin) {
+            return ageMin < ONLINE_MIN ? 1.0 : 0.35;
+        }
+        // RSSI (dBm) -> 1..10 signal score; -120 ~ 1, -50 ~ 10. Non-negative
+        // rssi (e.g. the hub's own announce, 0) means "no link" -> null.
+        function sigScore(rssi) {
+            if (rssi === null || rssi === undefined || rssi >= 0) return null;
+            const q = Math.round((rssi + 120) / 70 * 9) + 1;
+            return Math.max(1, Math.min(10, q));
+        }
+
+        function loadPresence() {
+            fetch('/api/devices/presence')
+                .then(r => r.ok ? r.json() : null)
+                .then(d => {
+                    const host = document.getElementById('chatPresence');
+                    if (!host || !d || !Array.isArray(d.devices)) return;
+                    host.innerHTML = '';
+                    const now = Date.now();
+                    for (const dev of d.devices) {
+                        if (!dev.name || !dev.last_seen) continue;
+                        if (deletedDevices && deletedDevices.includes(dev.name)) continue;
+                        const ageMs  = now - new Date(dev.last_seen).getTime();
+                        const ageMin = Math.max(0, Math.floor(ageMs / 60000));
+                        // Devices we haven't heard from in > 2 h are
+                        // effectively offline; drop them from the strip
+                        // so the dots represent "currently around" only.
+                        if (ageMin > 120) continue;
+                        const online = ageMin < ONLINE_MIN;
+                        const dot = document.createElement('span');
+                        dot.className = 'presence-dot';
+                        // Online = device colour; offline = grey, dimmed.
+                        dot.style.background = online ? colorForDevice(dev.name) : '#9ca3af';
+                        dot.style.opacity    = presenceOpacity(ageMin);
+                        const ageStr = ageMin < 1
+                            ? 'just now'
+                            : ageMin < 60
+                                ? ageMin + ' min ago'
+                                : Math.floor(ageMin / 60) + ' h ' +
+                                  (ageMin % 60) + ' m ago';
+                        const score = sigScore(dev.rssi);
+                        const sigStr = score !== null ? ' ' + score + '/10' : '';
+                        dot.title = dev.name + ' - ' + (online ? 'online' : 'offline') +
+                                    sigStr + ', last seen ' + ageStr;
+                        host.appendChild(dot);
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function probeAndRefreshPresence() {
+            const btn = document.getElementById('chatRefreshBtn');
+            if (btn) btn.classList.add('spinning');
+            fetch('/api/devices/probe', {method: 'POST'})
+                .then(r => r.ok ? r.json() : null)
+                .then(d => {
+                    if (d && d.status === 'debounced') {
+                        showToast('Probe debounced — wait ' + d.retry_in + 's');
+                    }
+                })
+                .catch(() => null)
+                .finally(() => {
+                    // Give devices a few seconds to receive WHO? and reply.
+                    // ESP32-C3 and PicoB both ack within ~1-2 s; 4 s leaves
+                    // headroom for weak signal / retry.
+                    setTimeout(() => {
+                        loadPresence();
+                        if (btn) btn.classList.remove('spinning');
+                    }, 4000);
+                });
+        }
+
+        function refreshPendingStatuses() {
+            // Find message DIVs marked .pending and ask the server for their
+            // current status. Simple polling: re-query each one until it
+            // settles.  (Simpler alternative: re-fetch the last 50 messages.)
+            const pendings = document.querySelectorAll('.msg.pending');
+            if (!pendings.length) return;
+            // Just re-fetch the last 50; server returns each row's current status
+            fetch('/api/messages?limit=50').then(r => r.json()).then(data => {
+                if (!data || !Array.isArray(data.messages)) return;
+                const byId = {};
+                for (const m of data.messages) byId[m.id] = m;
+                pendings.forEach(node => {
+                    const id = parseInt(node.dataset.id, 10);
+                    const fresh = byId[id];
+                    if (!fresh) return;
+                    if (fresh.status !== 'pending') {
+                        // Replace the node with a re-rendered version
+                        node.replaceWith(renderMessage(fresh));
+                    }
+                });
+            }).catch(() => {});
+        }
+
+        function chatSend() {
+            const inp  = document.getElementById('chatInput');
+            const btn  = document.getElementById('chatSendBtn');
+            const text = inp.value.trim();
+            if (!text) return;
+            if (text.length > CHAT_MAX_LEN) return;  // input has maxlength too
+            btn.disabled = true;
+            fetch('/api/messages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            }).then(r => r.json().then(j => ({ ok: r.ok, body: j })))
+              .then(({ ok, body }) => {
+                if (ok) {
+                    inp.value = '';
+                    updateChatCounter();
+                    // Pull immediately so it shows up faster than 2s
+                    pollChat();
+                } else {
+                    alert('Send failed: ' + (body.error || 'unknown'));
+                }
+              }).catch(e => {
+                alert('Network error: ' + e);
+              }).finally(() => {
+                btn.disabled = false;
+                inp.focus();
+              });
+        }
+
+        function updateChatCounter() {
+            const inp = document.getElementById('chatInput');
+            const c   = document.getElementById('chatCounter');
+            if (inp && c) c.textContent = (CHAT_MAX_LEN - inp.value.length);
+        }
+
+
+        function pollLiveLocation() {
+            fetch('/api/live?latest_per_device=1')
+                .then(r => r.json())
+                .then(data => {
+                    const latests = (data && data.latests) || [];
+
+                    // Filter out deleted devices and any not matching the
+                    // current device picker (when a single device is
+                    // selected). When "All" is picked, show one marker
+                    // per device, each in its own colour.
+                    const visible = latests.filter(p => {
+                        const did = p.source || '';
+                        if (deletedDevices.includes(did)) return false;
+                        if (currentDevice && did !== currentDevice) return false;
+                        if (typeof p.lat !== 'number' ||
+                            typeof p.lon !== 'number') return false;
+                        return true;
+                    });
+                    const visibleIds = new Set(visible.map(p => p.source || ''));
+
+                    const now = Date.now();
+                    for (const p of visible) {
+                        const did   = p.source || 'B1';
+                        const color = colorForDevice(did);
+                        // Age the marker so users can see at a glance
+                        // when a device has gone quiet. <5 min = fresh,
+                        // 5-30 min = faded, >30 min = mostly translucent.
+                        const ageMs  = now - new Date(p.recv_at).getTime();
+                        const ageMin = Math.max(0, Math.floor(ageMs / 60000));
+                        const ageStr = ageMin < 1
+                            ? 'just now'
+                            : (ageMin < 60
+                                ? ageMin + ' min ago'
+                                : Math.floor(ageMin / 60) + ' h ' +
+                                  (ageMin % 60) + ' m ago');
+                        const ageColor = ageMin < 5  ? '#10b981'   // green
+                                       : ageMin < 30 ? '#f59e0b'   // amber
+                                                     : '#dc2626';  // red
+                        const opacity  = ageMin < 5  ? 1.0
+                                       : ageMin < 30 ? 0.7
+                                                     : 0.4;
+                        const popup =
+                            '<b>' + escHtml(did) + '</b>' +
+                            '<br>at ' + relTime(p.recv_at) +
+                            '<br><span style="color:' + ageColor +
+                            ';font-weight:600">' + ageStr + '</span>';
+
+                        if (liveMarkers[did]) {
+                            liveMarkers[did]
+                                .setLatLng([p.lat, p.lon])
+                                .setIcon(makePinIcon(color))
+                                .setOpacity(opacity)
+                                .setPopupContent(popup);
+                        } else {
+                            liveMarkers[did] = L.marker(
+                                [p.lat, p.lon],
+                                {icon: makePinIcon(color), opacity: opacity}
+                            ).addTo(map).bindPopup(popup);
+                        }
+                    }
+
+                    // Drop markers for devices that are no longer visible
+                    // (filtered out, deleted, or fell off the latest set).
+                    for (const did in liveMarkers) {
+                        if (!visibleIds.has(did)) {
+                            map.removeLayer(liveMarkers[did]);
+                            delete liveMarkers[did];
+                        }
+                    }
+
+                    // Only auto-center on first fix AND only if user isn't
+                    // actively browsing trips/journeys on a profile tab.
+                    const userBrowsing = (currentProfile !== null || viewingJourneys);
+                    if (!liveCenteredOnce && !userBrowsing && visible.length > 0) {
+                        const p = visible[0];
+                        map.setView([p.lat, p.lon], 15);
+                        liveCenteredOnce = true;
+                    }
+                })
+                .catch(err => {
+                    // Network/server hiccup: silently skip this poll cycle
+                });
+        }
+
+        // Re-poll immediately so colour/visibility changes show without a 2 s lag.
+        function refreshLiveMarkers() { pollLiveLocation(); }
+
+        function escHtml(s) {
+            return String(s).replace(/[&<>"']/g, c =>
+                ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        // Outlier rejection. Returns coords + tsArr with single-point
+        // GPS spikes removed. A fix B is dropped when going A→B→C is
+        // significantly longer than going A→C directly AND A↔C are
+        // close — typical signature of urban-canyon multipath where
+        // the receiver briefly reports a position off the actual road.
+        //
+        // Keeps endpoints (no neighbours to compare against). Won't
+        // drop legitimate sharp turns because those still have small
+        // detour ratios (A→B→C ≈ A→C times sqrt(2) in a right angle).
+        function rejectOutliers(coords, tsArr) {
+            if (coords.length < 3) return {coords, tsArr};
+            const outC = [coords[0]];
+            const outT = [tsArr[0]];
+            function dist(a, b) {
+                const r = (a[0] + b[0]) * 0.5 * 0.01745329;
+                const dlat = (b[0] - a[0]) * 111320.0;
+                const dlon = (b[1] - a[1]) * 111320.0 * Math.cos(r);
+                return Math.sqrt(dlat * dlat + dlon * dlon);
+            }
+            for (let i = 1; i < coords.length - 1; i++) {
+                const ab = dist(coords[i - 1], coords[i]);
+                const bc = dist(coords[i],     coords[i + 1]);
+                const ac = dist(coords[i - 1], coords[i + 1]);
+                // B is a spike if the detour through B is >3x the
+                // direct A→C, AND A is reasonably close to C (so the
+                // 'direct' line is short — i.e. A and C were both
+                // sampled on the actual road).
+                if (ac < 150 && (ab + bc) > 2 * ac && (ab + bc) > 150) {
+                    continue;
+                }
+                outC.push(coords[i]);
+                outT.push(tsArr[i]);
+            }
+            outC.push(coords[coords.length - 1]);
+            outT.push(tsArr[tsArr.length - 1]);
+            return {coords: outC, tsArr: outT};
+        }
+
+        // Split a coord-array into separate segments whenever two
+        // consecutive fixes are too far apart in time or distance —
+        // GPS dropout markers (tunnels, urban canyons, device losing
+        // sky view). Returns an array of [[lat,lon], ...] segments.
+        // The original polyline through all points would otherwise
+        // draw a straight line across the gap.
+        function polylineSegments(coords, tsArr, maxGapS, maxGapM) {
+            const segments = [];
+            let current = [];
+            let prevTs = null, prevLat = null, prevLon = null;
+            for (let i = 0; i < coords.length; i++) {
+                const [lat, lon] = coords[i];
+                const ts = tsArr[i];
+                let breakHere = false;
+                if (current.length > 0) {
+                    // Time gap (handles ISO strings + epoch numbers).
+                    if (ts !== undefined && prevTs !== undefined) {
+                        const cur  = typeof ts     === 'number' ? ts * 1000
+                                                                : new Date(ts).getTime();
+                        const prev = typeof prevTs === 'number' ? prevTs * 1000
+                                                                : new Date(prevTs).getTime();
+                        if (!isNaN(cur) && !isNaN(prev) &&
+                            (cur - prev) > maxGapS * 1000) {
+                            breakHere = true;
+                        }
+                    }
+                    // Distance gap — equirectangular metres.
+                    if (!breakHere && prevLat !== null) {
+                        const r    = (prevLat + lat) * 0.5 * 0.01745329;
+                        const dlat = (lat - prevLat) * 111320.0;
+                        const dlon = (lon - prevLon) * 111320.0 * Math.cos(r);
+                        if (Math.sqrt(dlat * dlat + dlon * dlon) > maxGapM) {
+                            breakHere = true;
+                        }
+                    }
+                }
+                if (breakHere && current.length) {
+                    segments.push(current);
+                    current = [];
+                }
+                current.push([lat, lon]);
+                prevTs = ts; prevLat = lat; prevLon = lon;
+            }
+            if (current.length) segments.push(current);
+            return segments;
+        }
+
+        // Hover-tooltip format for a trip fix's timestamp. Accepts
+        // either an ISO string (typical /api/trips/<id> response) or
+        // an epoch number (some legacy rows). Returns 'YYYY-MM-DD HH:MM:SS'.
+        function formatTripTime(t) {
+            if (t === null || t === undefined || t === '') return '';
+            let dt;
+            if (typeof t === 'number') dt = new Date(t * 1000);
+            else                       dt = new Date(t);
+            if (isNaN(dt.getTime()))   return String(t);
+            const pad = n => String(n).padStart(2, '0');
+            return dt.getFullYear() + '-' +
+                   pad(dt.getMonth() + 1) + '-' +
+                   pad(dt.getDate()) + ' ' +
+                   pad(dt.getHours()) + ':' +
+                   pad(dt.getMinutes()) + ':' +
+                   pad(dt.getSeconds());
+        }
+
+        // Format an ISO timestamp as "HH:MM:SS" plus a relative-day suffix
+        // for older points: "HH:MM:SS (yesterday)" / "(N days ago)".
+        function relTime(iso) {
+            if (!iso) return '';
+            const dt = new Date(iso);
+            if (isNaN(dt)) return iso;
+            const time = String(dt.getHours()).padStart(2,'0') + ':' +
+                         String(dt.getMinutes()).padStart(2,'0') + ':' +
+                         String(dt.getSeconds()).padStart(2,'0');
+            const now    = new Date();
+            const today  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const dtDate = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+            const days   = Math.round((today - dtDate) / 86400000);
+            if (days <= 0) return time;
+            if (days === 1) return time + ' (yesterday)';
+            return time + ' (' + days + ' days ago)';
+        }
+
+        setInterval(loadAllData, 30000);
+        setInterval(pollLiveLocation, 2000);
+        setInterval(pollChat, 2000);
+        // Re-render presence dots every 30 s so opacity drifts down as
+        // devices go quiet (no LoRa traffic — just a DB read).
+        setInterval(loadPresence, 30000);
+        window.addEventListener('load', () => {
+            initRangePicker();    // restore preset/custom selection from localStorage
+            loadDevices();        // populates the device <select> from /api/devices
+            initMap();
+            loadAllData();
+            pollLiveLocation();   // immediate first fetch, don't wait 2s
+            pollChat();           // immediate first fetch
+            loadPresence();       // chat-header dots — passive read
+            // Pull any unsent trips from devices on every page load.
+            // If a device is selected, just that one; otherwise every
+            // known device. Server-side debounced at 20 s per device.
+            if (currentDevice) {
+                syncDevice(currentDevice);
+            } else {
+                fetch('/api/devices').then(r => r.ok ? r.json() : null)
+                    .then(d => {
+                        if (!d || !Array.isArray(d.devices)) return;
+                        for (const dev of d.devices) {
+                            if (dev.device_id) syncDevice(dev.device_id);
+                        }
+                    })
+                    .catch(() => {});
+            }
+            // Wire chat input
+            const inp = document.getElementById('chatInput');
+            const btn = document.getElementById('chatSendBtn');
+            if (inp && btn) {
+                btn.addEventListener('click', chatSend);
+                inp.addEventListener('keydown', e => {
+                    if (e.key === 'Enter') chatSend();
+                });
+                inp.addEventListener('input', updateChatCounter);
+                updateChatCounter();
+            }
+            // Tell Leaflet to recompute its size when the layout changes
+            // (window resize, phone rotation). Without this, tiles can get
+            // stuck at the wrong dimensions after viewport changes.
+            const refreshMap = () => {
+                if (typeof map !== 'undefined' && map) {
+                    setTimeout(() => map.invalidateSize(), 150);
+                }
+            };
+            window.addEventListener('resize', refreshMap);
+            window.addEventListener('orientationchange', refreshMap);
+            loadVersionBadge();
+        });
+
+        // Bottom-right version badge — short git SHA + page-load time.
+        // Helps when comparing screenshots: 'this is build abc1234,
+        // loaded at 14:03'.
+        function loadVersionBadge() {
+            const el = document.getElementById('versionBadge');
+            if (!el) return;
+            const loaded = new Date().toLocaleTimeString();
+            fetch('/api/version').then(r => r.ok ? r.json() : null)
+                .then(d => {
+                    const sha = (d && d.short_sha) || '???';
+                    el.innerHTML = 'rev ' +
+                        '<span style="font-family:monospace">' + sha + '</span>' +
+                        ' · loaded ' + loaded;
+                })
+                .catch(() => { el.textContent = 'loaded ' + loaded; });
+        }
+    </script>
+    <!-- Small build/load badge in the bottom-right corner so a
+         screenshot tells which revision of the UI we're looking at. -->
+    <div id="versionBadge" style="
+        position: fixed; right: 8px; bottom: 6px;
+        font-size: 11px; color: #888;
+        background: rgba(255,255,255,0.85);
+        padding: 2px 6px; border-radius: 4px;
+        pointer-events: none; z-index: 9500;
+        font-family: -apple-system, sans-serif;">…</div>
+</body>
+</html>

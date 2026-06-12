@@ -1,0 +1,28 @@
+{
+  "profiles": [
+    {
+      "id": "walking",
+      "name": "Walking",
+      "type": "walking",
+      "icon": "🚶",
+      "color": "#4CAF50",
+      "auto_assign": true
+    },
+    {
+      "id": "cycling",
+      "name": "Cycling",
+      "type": "cycling",
+      "icon": "🚴",
+      "color": "#2196F3",
+      "auto_assign": true
+    },
+    {
+      "id": "driving",
+      "name": "Driving",
+      "type": "driving",
+      "icon": "🚗",
+      "color": "#f44336",
+      "auto_assign": true
+    }
+  ]
+}

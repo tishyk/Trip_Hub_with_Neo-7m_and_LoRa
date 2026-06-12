@@ -1,0 +1,59 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+# Editor settings — not part of the project
+.vscode/
+**/.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+*.swp
+*.bak
+*.tmp
+*~
+
+# Claude Code per-user runtime state (project doc is CLAUDE.md at root +
+# per-project, anything else under .claude/ is local agent state)
+**/.claude/
+
+# Per-project VS Code workspace files (the shared multi-root config
+# esp32_projects.code-workspace at repo root stays tracked).
+PicoB/*.code-workspace
+ESP32_C3/*.code-workspace
+Hub_Server/*.code-workspace
+Hub_Server_Firmware/*.code-workspace
+Trip_Hub/*.code-workspace
+
+# --- Showcase: keep real fleet data out of the public repo ---
+# (files remain on disk locally; just not published). Runtime logs, the
+# live SQLite DBs, and recorded GPS trips contain location data + paths.
+Hub_Server/logs/*
+!Hub_Server/logs/picoA_serial.log
+Trip_Hub/trips.db
+Trip_Hub/chat.db
+Trip_Hub/deleted_trips.json
+Trip_Hub/incoming/
+# All recorded trips except two curated samples (one driving, one cycling).
+PicoB/trips/*
+!PicoB/trips/T1777725397.gps
+!PicoB/trips/T1777725397.json
+!PicoB/trips/T1777724727.gps
+!PicoB/trips/T1777724727.json
+
+# Local-only WIP / one-off diagnostics — not part of the showcase
+Trip_Hub/_compare_trips.py
+Trip_Hub/VERSION
